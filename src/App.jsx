@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { PlusCircle, List, LayoutDashboard, Trash2, Wallet, Tag, ArrowDownCircle, ArrowUpCircle, Calendar, Settings, Pencil, Download, LogOut, User } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
+// IMPORTANTE: Añadimos getApps y getApp
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, signInWithCustomToken, signInAnonymously } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 
-// 1. Obtención ultra-segura de las credenciales (Evita pantallas blancas)
+// 1. Obtención ultra-segura de las credenciales
 const getSafeGlobalConfig = () => {
   if (typeof __firebase_config !== 'undefined') {
     try {
@@ -28,7 +29,9 @@ const isCanvas = typeof __firebase_config !== 'undefined';
 const rawAppId = typeof __app_id !== 'undefined' ? String(__app_id) : "mis-gastos-personales";
 const appId = rawAppId.replace(/\//g, '_');
 
-const app = initializeApp(firebaseConfig);
+// 2. LA SOLUCIÓN AL CANVAS EN BLANCO:
+// Verificamos si Firebase ya está inicializado para evitar que el recargo en vivo lo rompa
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
@@ -41,7 +44,7 @@ const LoadingSpinner = () => (
   </svg>
 );
 
-// Cálculo seguro de fechas (Evita errores de zona horaria)
+// Cálculo seguro de fechas
 const getInitialDates = () => {
   const today = new Date();
   const yyyy = today.getFullYear();
@@ -64,7 +67,7 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   
-// Estado para el filtro de fechas (Ahora con memoria guardada)
+  // Estado para el filtro de fechas (Ahora con memoria guardada)
   const initDates = getInitialDates();
   const [filterStartDate, setFilterStartDate] = useState(() => {
     return localStorage.getItem('gastos_filterStartDate') || initDates.start;
@@ -73,12 +76,12 @@ export default function App() {
     return localStorage.getItem('gastos_filterEndDate') || initDates.end;
   });
 
-   // Efecto que guarda las fechas automáticamente cuando el usuario las cambia
+  // Efecto que guarda las fechas automáticamente cuando el usuario las cambia
   useEffect(() => {
     localStorage.setItem('gastos_filterStartDate', filterStartDate);
     localStorage.setItem('gastos_filterEndDate', filterEndDate);
   }, [filterStartDate, filterEndDate]);
-  
+
   // Estado de los formularios
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
@@ -207,7 +210,7 @@ export default function App() {
     setIsSubmitting(true);
     const newTx = {
       amount: parseFloat(amount),
-      description: description || 'Sin detalle',
+      description: description.trim(), // Dejamos que quede vacío si no escribes nada
       category: category,
       subcategory: subcategory,
       type: txType,
@@ -635,36 +638,46 @@ export default function App() {
               <h2 className="text-2xl font-bold text-gray-800 mb-6">Historial</h2>
               
               {filteredTransactions.length === 0 ? (
-                 <div className="text-center py-10">
-                   <div className="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><List size={32} /></div>
-                   <p className="text-gray-500">No hay movimientos en estas fechas.</p>
+                 <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-gray-200">
+                   <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><List size={32} /></div>
+                   <p className="text-gray-500 font-medium">No hay movimientos en estas fechas.</p>
                  </div>
               ) : (
                 <div className="space-y-3">
                   {filteredTransactions.map((tx) => (
-                    <div key={tx.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center group">
-                      <div className="flex gap-3 items-center overflow-hidden">
-                         <div className={`p-3 rounded-full flex-shrink-0 ${tx.type === 'ingreso' ? 'bg-emerald-50 text-emerald-500' : 'bg-red-50 text-red-500'}`}>
-                           {tx.type === 'ingreso' ? <ArrowUpCircle size={20} /> : <ArrowDownCircle size={20} />}
+                    <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center group hover:shadow-md transition-all">
+                      <div className="flex gap-3 items-center overflow-hidden flex-1">
+                         <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'ingreso' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                           {tx.type === 'ingreso' ? <ArrowUpCircle size={24} /> : <ArrowDownCircle size={24} />}
                          </div>
-                         <div className="overflow-hidden">
-                           <p className="font-semibold text-gray-800 truncate">{tx.description || 'Sin detalle'}</p>
-                           <div className="flex items-center text-xs text-gray-500 gap-2 mt-1">
-                             <span className="bg-gray-100 px-2 py-0.5 rounded-md text-gray-600">
-                               {tx.category} 
-                               {tx.subcategory && <span className="font-semibold text-gray-400"> › {tx.subcategory}</span>}
-                             </span>
+                         <div className="overflow-hidden flex-1 pr-2">
+                           <div className="flex items-center gap-2 mb-0.5">
+                             <h3 className="font-bold text-gray-800 text-sm md:text-base truncate">{tx.category}</h3>
+                             {tx.subcategory && (
+                               <span className="bg-gray-100 border border-gray-200 text-gray-600 px-2 py-0.5 rounded text-[10px] font-semibold truncate shrink-0">
+                                 {tx.subcategory}
+                               </span>
+                             )}
+                           </div>
+                           
+                           {/* Solo mostramos la descripción si existe y no es "Sin detalle" (por los registros antiguos) */}
+                           {(tx.description && tx.description !== 'Sin detalle') && (
+                             <p className="text-xs text-gray-500 truncate mb-1">{tx.description}</p>
+                           )}
+                           
+                           <div className="flex items-center text-[10px] text-gray-400 gap-1 font-medium mt-1">
+                             <Calendar size={12} />
                              <span>{tx.date}</span>
                            </div>
                          </div>
                       </div>
-                      <div className="flex items-center gap-3 flex-shrink-0">
-                        <span className={`font-bold ${tx.type === 'ingreso' ? 'text-emerald-600' : 'text-gray-900'}`}>
+                      <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                        <span className={`font-bold text-base ${tx.type === 'ingreso' ? 'text-emerald-600' : 'text-gray-900'}`}>
                           {tx.type === 'ingreso' ? '+' : '-'}S/ {tx.amount.toFixed(2)}
                         </span>
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => handleEditClick(tx)} className="text-gray-300 hover:text-blue-500 p-2 rounded-full hover:bg-blue-50 transition-colors"><Pencil size={18} /></button>
-                          <button onClick={() => deleteTransaction(tx.id)} className="text-gray-300 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"><Trash2 size={18} /></button>
+                        <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => handleEditClick(tx)} className="text-gray-400 hover:text-blue-500 p-1.5 rounded-full hover:bg-blue-50 transition-colors"><Pencil size={14} /></button>
+                          <button onClick={() => deleteTransaction(tx.id)} className="text-gray-400 hover:text-red-500 p-1.5 rounded-full hover:bg-red-50 transition-colors"><Trash2 size={14} /></button>
                         </div>
                       </div>
                     </div>
