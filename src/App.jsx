@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, List, LayoutDashboard, Trash2, Wallet, Tag, ArrowDownCircle, ArrowUpCircle, Calendar, Settings, Pencil, Download, LogOut, User } from 'lucide-react';
+// IMPORTANTE: Hemos añadido nuevos íconos aquí (Utensils, Car, Gamepad2, ShoppingBag, Zap, Smartphone, Users, DollarSign)
+import { PlusCircle, List, LayoutDashboard, Trash2, Wallet, Tag, ArrowDownCircle, ArrowUpCircle, Calendar, Settings, Pencil, Download, LogOut, User, Utensils, Car, Gamepad2, ShoppingBag, Zap, Smartphone, Users, DollarSign } from 'lucide-react';
 // IMPORTANTE: Añadimos getApps y getApp
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, signInWithCustomToken, signInAnonymously } from 'firebase/auth';
@@ -44,6 +45,20 @@ const LoadingSpinner = () => (
   </svg>
 );
 
+// Diccionario inteligente de íconos para categorías (Cero mantenimiento)
+const getCategoryIcon = (categoryName, size = 20) => {
+  const name = categoryName.toLowerCase();
+  if (name.includes('alimento') || name.includes('comida')) return <Utensils size={size} />;
+  if (name.includes('transporte') || name.includes('auto') || name.includes('taxi')) return <Car size={size} />;
+  if (name.includes('entretenimiento') || name.includes('diversión') || name.includes('salida')) return <Gamepad2 size={size} />;
+  if (name.includes('compra') || name.includes('hogar')) return <ShoppingBag size={size} />;
+  if (name.includes('servicio') || name.includes('luz') || name.includes('agua')) return <Zap size={size} />;
+  if (name.includes('suscrip')) return <Smartphone size={size} />;
+  if (name.includes('tercero') || name.includes('familia') || name.includes('amigo') || name.includes('pareja')) return <Users size={size} />;
+  if (name.includes('ingreso') || name.includes('sueldo') || name.includes('salario') || name.includes('extra')) return <DollarSign size={size} />;
+  return <Tag size={size} />; // Ícono por defecto si no reconoce la palabra
+};
+
 // Cálculo seguro de fechas
 const getInitialDates = () => {
   const today = new Date();
@@ -56,6 +71,23 @@ const getInitialDates = () => {
     start: `${yyyy}-${mm}-01`,
     end: `${yyyy}-${mm}-${dd}`
   };
+};
+
+// Formateador de fechas para el historial (Hoy, Ayer, 17 de febrero)
+const formatDateLabel = (dateString) => {
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+
+  if (dateString === todayStr) return 'Hoy';
+  if (dateString === yesterdayStr) return 'Ayer';
+
+  // Usamos T12:00:00 para evitar desajustes de zona horaria
+  const dateObj = new Date(`${dateString}T12:00:00`);
+  return dateObj.toLocaleDateString('es-ES', { month: 'long', day: 'numeric' });
 };
 
 export default function App() {
@@ -512,7 +544,10 @@ export default function App() {
                       <div key={index} className="p-3 hover:bg-gray-50 rounded-lg transition-colors">
                         <div className="flex justify-between items-center mb-2">
                           <div className="flex items-center gap-2">
-                            <div className="bg-red-50 p-1.5 rounded-md text-red-500"><Tag size={14} /></div>
+                            <div className="bg-red-50 p-1.5 rounded-md text-red-500">
+                              {/* Reemplazamos el ícono estático por el dinámico */}
+                              {getCategoryIcon(item.category, 14)}
+                            </div>
                             <span className="font-medium text-gray-700 text-sm">{item.category}</span>
                           </div>
                           <div className="text-right">
@@ -643,45 +678,72 @@ export default function App() {
                    <p className="text-gray-500 font-medium">No hay movimientos en estas fechas.</p>
                  </div>
               ) : (
-                <div className="space-y-3">
-                  {filteredTransactions.map((tx) => (
-                    <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center group hover:shadow-md transition-all">
-                      <div className="flex gap-3 items-center overflow-hidden flex-1">
-                         <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'ingreso' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                           {tx.type === 'ingreso' ? <ArrowUpCircle size={24} /> : <ArrowDownCircle size={24} />}
-                         </div>
-                         <div className="overflow-hidden flex-1 pr-2">
-                           <div className="flex items-center gap-2 mb-0.5">
-                             <h3 className="font-bold text-gray-800 text-sm md:text-base truncate">{tx.category}</h3>
-                             {tx.subcategory && (
-                               <span className="bg-gray-100 border border-gray-200 text-gray-600 px-2 py-0.5 rounded text-[10px] font-semibold truncate shrink-0">
-                                 {tx.subcategory}
-                               </span>
-                             )}
-                           </div>
-                           
-                           {/* Solo mostramos la descripción si existe y no es "Sin detalle" (por los registros antiguos) */}
-                           {(tx.description && tx.description !== 'Sin detalle') && (
-                             <p className="text-xs text-gray-500 truncate mb-1">{tx.description}</p>
-                           )}
-                           
-                           <div className="flex items-center text-[10px] text-gray-400 gap-1 font-medium mt-1">
-                             <Calendar size={12} />
-                             <span>{tx.date}</span>
-                           </div>
-                         </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                        <span className={`font-bold text-base ${tx.type === 'ingreso' ? 'text-emerald-600' : 'text-gray-900'}`}>
-                          {tx.type === 'ingreso' ? '+' : '-'}S/ {tx.amount.toFixed(2)}
-                        </span>
-                        <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => handleEditClick(tx)} className="text-gray-400 hover:text-blue-500 p-1.5 rounded-full hover:bg-blue-50 transition-colors"><Pencil size={14} /></button>
-                          <button onClick={() => deleteTransaction(tx.id)} className="text-gray-400 hover:text-red-500 p-1.5 rounded-full hover:bg-red-50 transition-colors"><Trash2 size={14} /></button>
+                <div className="space-y-6">
+                  {Object.keys(
+                    filteredTransactions.reduce((acc, tx) => {
+                      if (!acc[tx.date]) acc[tx.date] = [];
+                      acc[tx.date].push(tx);
+                      return acc;
+                    }, {})
+                  ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime()).map(dateKey => {
+                    const dayTransactions = filteredTransactions.filter(t => t.date === dateKey);
+                    
+                    // Calculamos el balance total del día
+                    const dayTotal = dayTransactions.reduce((sum, tx) => sum + (tx.type === 'ingreso' ? tx.amount : -tx.amount), 0);
+                    const isPositive = dayTotal >= 0;
+
+                    return (
+                      <div key={dateKey} className="space-y-3">
+                        {/* Cabecera del Día (Hoy, Ayer, etc.) */}
+                        <div className="flex justify-between items-center px-1 border-b border-gray-200 pb-2 mb-2">
+                          <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                            {formatDateLabel(dateKey)}
+                          </h3>
+                          {/* CAMBIO AQUÍ: Usamos text-red-600 en lugar de text-gray-600 para saldos negativos */}
+                          <span className={`text-xs font-bold ${isPositive ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {isPositive ? '+' : ''}S/ {Math.abs(dayTotal).toFixed(2)}
+                          </span>
                         </div>
+
+                        {/* Transacciones de ese día */}
+                        {dayTransactions.map((tx) => (
+                          <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center group hover:shadow-md transition-all">
+                            <div className="flex gap-3 items-center overflow-hidden flex-1">
+                               <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 ${tx.type === 'ingreso' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                                 {/* Reemplazamos la flecha genérica por el ícono de la categoría */}
+                                 {getCategoryIcon(tx.category, 24)}
+                               </div>
+                               <div className="overflow-hidden flex-1 pr-2">
+                                 <div className="flex items-center gap-2 mb-0.5">
+                                   <h3 className="font-bold text-gray-800 text-sm md:text-base truncate">{tx.category}</h3>
+                                   {tx.subcategory && (
+                                     <span className="bg-gray-100 border border-gray-200 text-gray-600 px-2 py-0.5 rounded text-[10px] font-semibold truncate shrink-0">
+                                       {tx.subcategory}
+                                     </span>
+                                   )}
+                                 </div>
+                                 
+                                 {/* Solo mostramos la descripción si existe */}
+                                 {(tx.description && tx.description !== 'Sin detalle') && (
+                                   <p className="text-xs text-gray-500 truncate mb-1">{tx.description}</p>
+                                 )}
+                               </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                              {/* CAMBIO AQUÍ: Usamos text-red-600 en lugar de text-gray-900 para los montos de gastos */}
+                              <span className={`font-bold text-base ${tx.type === 'ingreso' ? 'text-emerald-600' : 'text-red-600'}`}>
+                                {tx.type === 'ingreso' ? '+' : '-'}S/ {tx.amount.toFixed(2)}
+                              </span>
+                              <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => handleEditClick(tx)} className="text-gray-400 hover:text-blue-500 p-1.5 rounded-full hover:bg-blue-50 transition-colors"><Pencil size={14} /></button>
+                                <button onClick={() => deleteTransaction(tx.id)} className="text-gray-400 hover:text-red-500 p-1.5 rounded-full hover:bg-red-50 transition-colors"><Trash2 size={14} /></button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
