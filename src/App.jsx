@@ -2,17 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { PlusCircle, List, LayoutDashboard, Trash2, Wallet, Tag, ArrowDownCircle, ArrowUpCircle, Calendar, Settings, Pencil, Download, LogOut, User } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, signInWithCustomToken, signInAnonymously } from 'firebase/auth';
-// Añadimos arrayUnion y arrayRemove para manejar las listas de subcategorías
 import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 
-// 1. Obtención segura de las credenciales
+// 1. Obtención ultra-segura de las credenciales (Evita pantallas blancas)
 const getSafeGlobalConfig = () => {
-  try {
-    if (typeof __firebase_config !== 'undefined') {
-      return JSON.parse(__firebase_config);
+  if (typeof __firebase_config !== 'undefined') {
+    try {
+      return typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
+    } catch (e) {
+      console.warn("Error leyendo config de canvas, usando local");
     }
-  } catch (e) {
-    console.warn("Configuración de canvas no encontrada, usando local.");
   }
   return {
     apiKey: "AIzaSyCQYGMby_BTU7bPwXq5TBgnwTA2ptPWaNs",
@@ -34,13 +33,27 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
-// Ícono de Carga Personalizado
+// Ícono de Carga Personalizado y Seguro
 const LoadingSpinner = () => (
   <svg className="animate-spin h-5 w-5 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
   </svg>
 );
+
+// Cálculo seguro de fechas (Evita errores de zona horaria)
+const getInitialDates = () => {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const lastDayObj = new Date(yyyy, today.getMonth() + 1, 0);
+  const dd = String(lastDayObj.getDate()).padStart(2, '0');
+  
+  return {
+    start: `${yyyy}-${mm}-01`,
+    end: `${yyyy}-${mm}-${dd}`
+  };
+};
 
 export default function App() {
   const [transactions, setTransactions] = useState([]);
@@ -51,18 +64,36 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   
+// Estado para el filtro de fechas (Ahora con memoria guardada)
+  const initDates = getInitialDates();
+  const [filterStartDate, setFilterStartDate] = useState(() => {
+    return localStorage.getItem('gastos_filterStartDate') || initDates.start;
+  });
+  const [filterEndDate, setFilterEndDate] = useState(() => {
+    return localStorage.getItem('gastos_filterEndDate') || initDates.end;
+  });
+
+   // Efecto que guarda las fechas automáticamente cuando el usuario las cambia
+  useEffect(() => {
+    localStorage.setItem('gastos_filterStartDate', filterStartDate);
+    localStorage.setItem('gastos_filterEndDate', filterEndDate);
+  }, [filterStartDate, filterEndDate]);
+  
   // Estado de los formularios
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [txType, setTxType] = useState('gasto');
   const [category, setCategory] = useState('');
   const [subcategory, setSubcategory] = useState(''); 
-  const [txDate, setTxDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [txDate, setTxDate] = useState(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  });
 
   // Estados para Categorías y Subcategorías
   const [newCatName, setNewCatName] = useState('');
   const [newCatType, setNewCatType] = useState('gasto');
-  const [newSubcats, setNewSubcats] = useState({}); // Estado para los inputs de nuevas subcategorías por ID de categoría
+  const [newSubcats, setNewSubcats] = useState({}); 
   
   const [editingId, setEditingId] = useState(null);
 
@@ -114,7 +145,6 @@ export default function App() {
 
       unsubCat = onSnapshot(catRef, (snapshot) => {
         if (snapshot.empty) {
-          // Ahora las categorías por defecto incluyen su lista de subcategorías integradas
           const defaultCats = [
             { name: 'Alimentos', type: 'gasto', subcategories: ['Desayuno', 'Almuerzo', 'Cena', 'Snacks', 'Bebidas'] },
             { name: 'Transporte', type: 'gasto', subcategories: ['Público', 'Taxi', 'Gasolina', 'Cochera', 'Seguro / SOAT', 'Mantenimiento / Reparación'] },
@@ -193,7 +223,7 @@ export default function App() {
         await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'transactions'), newTx);
       }
       setAmount(''); setDescription(''); setSubcategory(''); 
-      setTxDate(new Date().toISOString().split('T')[0]); setActiveTab('list'); 
+      setActiveTab('list'); 
     } catch (error) {
       console.error("Error guardando:", error);
     } finally {
@@ -210,7 +240,7 @@ export default function App() {
   const cancelEdit = () => {
     setEditingId(null); setAmount(''); setDescription(''); setTxType('gasto'); 
     setCategory(''); setSubcategory(''); 
-    setTxDate(new Date().toISOString().split('T')[0]); setActiveTab('list');
+    setActiveTab('list');
   };
 
   const deleteTransaction = async (id) => {
@@ -229,7 +259,7 @@ export default function App() {
       await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'categories'), { 
         name: newCatName.trim(), 
         type: newCatType,
-        subcategories: [] // Inicializamos con arreglo vacío
+        subcategories: [] 
       });
       setNewCatName('');
     } catch (error) { 
@@ -250,11 +280,10 @@ export default function App() {
     if (!subName || !subName.trim() || !user) return;
     
     try {
-      // Usamos arrayUnion para agregar sin duplicar
       await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'categories', catId), {
         subcategories: arrayUnion(subName.trim())
       });
-      setNewSubcats({ ...newSubcats, [catId]: '' }); // Limpiamos el input de esta categoría
+      setNewSubcats({ ...newSubcats, [catId]: '' }); 
     } catch (error) {
       console.error("Error agregando subcategoría:", error);
     }
@@ -263,7 +292,6 @@ export default function App() {
   const handleDeleteSubcategory = async (catId, subName) => {
     if (!user) return;
     try {
-      // Usamos arrayRemove para quitar exactamente este texto
       await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'categories', catId), {
         subcategories: arrayRemove(subName)
       });
@@ -272,10 +300,17 @@ export default function App() {
     }
   };
 
+  // FILTRADO DE TRANSACCIONES SEGÚN FECHAS
+  const filteredTransactions = transactions.filter(t => {
+    if (filterStartDate && t.date < filterStartDate) return false;
+    if (filterEndDate && t.date > filterEndDate) return false;
+    return true;
+  });
+
   const exportToExcel = () => {
-    if (transactions.length === 0) return;
+    if (filteredTransactions.length === 0) return;
     const headers = ['Fecha', 'Tipo', 'Categoría', 'Subcategoría', 'Descripción', 'Monto'];
-    const csvRows = transactions.map(tx => {
+    const csvRows = filteredTransactions.map(tx => {
       const descSegura = tx.description ? tx.description.replace(/,/g, ' ') : '';
       const subSegura = tx.subcategory ? tx.subcategory.replace(/,/g, ' ') : '';
       return `${tx.date},${tx.type === 'ingreso' ? 'Ingreso' : 'Gasto'},${tx.category},${subSegura},${descSegura},${tx.amount.toFixed(2)}`;
@@ -284,7 +319,11 @@ export default function App() {
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', `Mis_Gastos_${new Date().toLocaleDateString('es-ES').replace(/\//g, '-')}.csv`);
+    
+    let fileName = `Mis_Gastos`;
+    if (filterStartDate && filterEndDate) fileName += `_${filterStartDate}_al_${filterEndDate}`;
+    link.setAttribute('download', `${fileName}.csv`);
+    
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
@@ -365,20 +404,22 @@ export default function App() {
     );
   }
 
-  // Cálculos automáticos para la App principal
-  const totalIngresos = transactions.filter(t => t.type === 'ingreso').reduce((sum, e) => sum + e.amount, 0);
-  const totalGastos = transactions.filter(t => t.type === 'gasto' || !t.type).reduce((sum, e) => sum + e.amount, 0);
+  // CÁLCULOS AUTOMÁTICOS BASADOS EN TRANSACCIONES FILTRADAS
+  const totalIngresos = filteredTransactions.filter(t => t.type === 'ingreso').reduce((sum, e) => sum + e.amount, 0);
+  const totalGastos = filteredTransactions.filter(t => t.type === 'gasto' || !t.type).reduce((sum, e) => sum + e.amount, 0);
   const balance = totalIngresos - totalGastos;
   const healthPercentage = totalIngresos > 0 ? Math.min((totalGastos / totalIngresos) * 100, 100) : (totalGastos > 0 ? 100 : 0);
 
   const expensesByCategory = categories.filter(c => c.type === 'gasto').map(cat => {
-    const total = transactions.filter(e => e.category === cat.name && (e.type === 'gasto' || !e.type)).reduce((sum, e) => sum + e.amount, 0);
+    const total = filteredTransactions.filter(e => e.category === cat.name && (e.type === 'gasto' || !e.type)).reduce((sum, e) => sum + e.amount, 0);
     return { category: cat.name, total, percentage: totalGastos > 0 ? (total / totalGastos) * 100 : 0 };
   }).filter(c => c.total > 0).sort((a, b) => b.total - a.total);
 
-  // Obtener la lista dinámica de subcategorías de la categoría seleccionada
   const currentCatObj = categories.find(c => c.name === category);
   const currentSubcats = currentCatObj?.subcategories || [];
+  
+  // Evitar error si el usuario es anónimo o no tiene email configurado
+  const userInitial = user?.email ? user.email.charAt(0).toUpperCase() : 'U';
 
   return (
     <div className="flex justify-center bg-gray-100 min-h-screen font-sans">
@@ -390,16 +431,40 @@ export default function App() {
             <Wallet size={24} />
             Mis Gastos
           </h1>
-          <img src={user?.photoURL || `https://ui-avatars.com/api/?name=${user?.email ? user.email[0] : 'U'}`} alt="Perfil" className="w-8 h-8 rounded-full border-2 border-emerald-400 bg-emerald-100" />
+          <img src={user?.photoURL || `https://ui-avatars.com/api/?name=${userInitial}&background=random`} alt="Perfil" className="w-8 h-8 rounded-full border-2 border-emerald-400 bg-emerald-100" />
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 pb-24 bg-gray-50">
           
+          {/* CONTROL DE FILTRO DE FECHAS GLOBAL */}
+          {activeTab !== 'add' && (
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 mb-4 flex gap-3 items-end animate-in fade-in">
+              <div className="flex-1">
+                <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1 flex items-center gap-1"><Calendar size={10}/> Desde</label>
+                <input 
+                  type="date" 
+                  value={filterStartDate} 
+                  onChange={e => setFilterStartDate(e.target.value)} 
+                  className="w-full bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-700 focus:outline-none focus:border-emerald-500" 
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1 flex items-center gap-1"><Calendar size={10}/> Hasta</label>
+                <input 
+                  type="date" 
+                  value={filterEndDate} 
+                  onChange={e => setFilterEndDate(e.target.value)} 
+                  className="w-full bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-700 focus:outline-none focus:border-emerald-500" 
+                />
+              </div>
+            </div>
+          )}
+
           {/* DASHBOARD */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
               <div className="bg-gradient-to-br from-emerald-600 to-teal-800 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
-                <p className="text-emerald-100 text-sm font-medium mb-1 mt-2 text-center">Balance Total</p>
+                <p className="text-emerald-100 text-sm font-medium mb-1 mt-2 text-center">Balance del Periodo</p>
                 <h2 className="text-4xl font-bold tracking-tight text-center mb-4">
                   S/ {balance.toFixed(2)}
                 </h2>
@@ -435,8 +500,8 @@ export default function App() {
               <div>
                 <h3 className="text-gray-700 font-semibold mb-3 px-1">Distribución de Gastos</h3>
                 {expensesByCategory.length === 0 ? (
-                  <p className="text-gray-400 text-center py-4 bg-white rounded-xl border border-dashed border-gray-300">
-                    Aún no hay gastos registrados.
+                  <p className="text-gray-400 text-center py-4 bg-white rounded-xl border border-dashed border-gray-300 text-sm">
+                    No hay gastos en estas fechas.
                   </p>
                 ) : (
                   <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-2 space-y-1">
@@ -523,9 +588,9 @@ export default function App() {
                   
                   {category && currentSubcats.length > 0 && (
                     <div className="flex flex-wrap gap-2 mt-2">
-                      {currentSubcats.map(sub => (
+                      {currentSubcats.map((sub, idx) => (
                         <button
-                          key={sub}
+                          key={idx}
                           type="button"
                           onClick={() => setSubcategory(sub)}
                           className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
@@ -569,14 +634,14 @@ export default function App() {
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
               <h2 className="text-2xl font-bold text-gray-800 mb-6">Historial</h2>
               
-              {transactions.length === 0 ? (
+              {filteredTransactions.length === 0 ? (
                  <div className="text-center py-10">
                    <div className="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><List size={32} /></div>
-                   <p className="text-gray-500">No hay movimientos registrados aún.</p>
+                   <p className="text-gray-500">No hay movimientos en estas fechas.</p>
                  </div>
               ) : (
                 <div className="space-y-3">
-                  {transactions.map((tx) => (
+                  {filteredTransactions.map((tx) => (
                     <div key={tx.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center group">
                       <div className="flex gap-3 items-center overflow-hidden">
                          <div className={`p-3 rounded-full flex-shrink-0 ${tx.type === 'ingreso' ? 'bg-emerald-50 text-emerald-500' : 'bg-red-50 text-red-500'}`}>
@@ -626,7 +691,10 @@ export default function App() {
 
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
                 <h3 className="text-sm font-semibold text-gray-600 mb-3">Exportar Datos</h3>
-                <button onClick={exportToExcel} disabled={transactions.length === 0} className="w-full flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border border-blue-200 py-3 rounded-lg text-sm font-bold hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:hover:bg-blue-50">
+                <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">
+                  Se descargará un archivo de Excel con los datos de las fechas que tengas seleccionadas arriba (Desde/Hasta).
+                </p>
+                <button onClick={exportToExcel} disabled={filteredTransactions.length === 0} className="w-full flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border border-blue-200 py-3 rounded-lg text-sm font-bold hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:hover:bg-blue-50">
                   <Download size={18} /> Descargar en Excel (CSV)
                 </button>
               </div>
@@ -660,8 +728,8 @@ export default function App() {
                           
                           {/* Lista de Subcategorías */}
                           <div className="flex flex-wrap gap-1.5 mb-3">
-                            {(cat.subcategories || []).map(sub => (
-                              <span key={sub} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
+                            {(cat.subcategories || []).map((sub, idx) => (
+                              <span key={idx} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
                                 {sub}
                                 <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
                               </span>
@@ -702,8 +770,8 @@ export default function App() {
                           </div>
                           
                           <div className="flex flex-wrap gap-1.5 mb-3">
-                            {(cat.subcategories || []).map(sub => (
-                              <span key={sub} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
+                            {(cat.subcategories || []).map((sub, idx) => (
+                              <span key={idx} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
                                 {sub}
                                 <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
                               </span>
