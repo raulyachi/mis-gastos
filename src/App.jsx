@@ -1,27 +1,46 @@
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, List, LayoutDashboard, Trash2, Wallet, Tag, ArrowDownCircle, ArrowUpCircle, Calendar, Settings, Pencil, Download, LogOut, Loader2 } from 'lucide-react';
+import { PlusCircle, List, LayoutDashboard, Trash2, Wallet, Tag, ArrowDownCircle, ArrowUpCircle, Calendar, Settings, Pencil, Download, LogOut, User } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, signInWithCustomToken, signInAnonymously } from 'firebase/auth';
+// Añadimos arrayUnion y arrayRemove para manejar las listas de subcategorías
+import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 
-// ----------------------------------------------------------------------
-// ⚠️ ¡IMPORTANTE! REEMPLAZA ESTO CON TU PROPIA CONFIGURACIÓN DE FIREBASE
-// ----------------------------------------------------------------------
-const firebaseConfig = {
-  apiKey: "AIzaSyCQYGMby_BTU7bPwXq5TBgnwTA2ptPWaNs",
-  authDomain: "mis-gastos-app-4bc96.firebaseapp.com",
-  projectId: "mis-gastos-app-4bc96",
-  storageBucket: "mis-gastos-app-4bc96.firebasestorage.app",
-  messagingSenderId: "463768093334",
-  appId: "1:463768093334:web:c4faca89e00e568a01f8b7"
+// 1. Obtención segura de las credenciales
+const getSafeGlobalConfig = () => {
+  try {
+    if (typeof __firebase_config !== 'undefined') {
+      return JSON.parse(__firebase_config);
+    }
+  } catch (e) {
+    console.warn("Configuración de canvas no encontrada, usando local.");
+  }
+  return {
+    apiKey: "AIzaSyCQYGMby_BTU7bPwXq5TBgnwTA2ptPWaNs",
+    authDomain: "mis-gastos-app-4bc96.firebaseapp.com",
+    projectId: "mis-gastos-app-4bc96",
+    storageBucket: "mis-gastos-app-4bc96.firebasestorage.app",
+    messagingSenderId: "463768093334",
+    appId: "1:463768093334:web:c4faca89e00e568a01f8b7"
+  };
 };
-const appId = "mis-gastos-personales"; // Puedes dejar este nombre
-// ----------------------------------------------------------------------
+
+const firebaseConfig = getSafeGlobalConfig();
+const isCanvas = typeof __firebase_config !== 'undefined';
+const rawAppId = typeof __app_id !== 'undefined' ? String(__app_id) : "mis-gastos-personales";
+const appId = rawAppId.replace(/\//g, '_');
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
+
+// Ícono de Carga Personalizado
+const LoadingSpinner = () => (
+  <svg className="animate-spin h-5 w-5 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+  </svg>
+);
 
 export default function App() {
   const [transactions, setTransactions] = useState([]);
@@ -29,27 +48,46 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false); // <-- Nuevo estado para procesando
-  const [isLoggingIn, setIsLoggingIn] = useState(false); // <-- Estado para el login
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   
   // Estado de los formularios
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [txType, setTxType] = useState('gasto');
   const [category, setCategory] = useState('');
+  const [subcategory, setSubcategory] = useState(''); 
   const [txDate, setTxDate] = useState(() => new Date().toISOString().split('T')[0]);
 
-  // Estado para nueva categoría
+  // Estados para Categorías y Subcategorías
   const [newCatName, setNewCatName] = useState('');
   const [newCatType, setNewCatType] = useState('gasto');
+  const [newSubcats, setNewSubcats] = useState({}); // Estado para los inputs de nuevas subcategorías por ID de categoría
+  
   const [editingId, setEditingId] = useState(null);
 
   useEffect(() => {
     setCategory('');
+    setSubcategory(''); 
   }, [txType]);
 
   // 1. Escuchar el estado de autenticación
   useEffect(() => {
+    const initAuth = async () => {
+      if (isCanvas) {
+        try {
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            await signInWithCustomToken(auth, __initial_auth_token);
+          } else {
+            await signInAnonymously(auth);
+          }
+        } catch (error) {
+          console.error("Error canvas auth:", error);
+        }
+      }
+    };
+    initAuth();
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setIsLoading(false);
@@ -76,9 +114,16 @@ export default function App() {
 
       unsubCat = onSnapshot(catRef, (snapshot) => {
         if (snapshot.empty) {
+          // Ahora las categorías por defecto incluyen su lista de subcategorías integradas
           const defaultCats = [
-            { name: 'Comida', type: 'gasto' }, { name: 'Transporte', type: 'gasto' },
-            { name: 'Servicios', type: 'gasto' }, { name: 'Salario', type: 'ingreso' }
+            { name: 'Alimentos', type: 'gasto', subcategories: ['Desayuno', 'Almuerzo', 'Cena', 'Snacks', 'Bebidas'] },
+            { name: 'Transporte', type: 'gasto', subcategories: ['Público', 'Taxi', 'Gasolina', 'Cochera', 'Seguro / SOAT', 'Mantenimiento / Reparación'] },
+            { name: 'Entretenimiento', type: 'gasto', subcategories: ['Salidas', 'Restaurantes', 'Bares', 'Alcohol', 'Eventos'] },
+            { name: 'Compras', type: 'gasto', subcategories: ['Hogar', 'Personal'] },
+            { name: 'Servicios', type: 'gasto', subcategories: ['Celular', 'Internet', 'Gas', 'Luz', 'Agua'] },
+            { name: 'Suscripciones', type: 'gasto', subcategories: ['Netflix', 'ChatGPT', 'Crunchyroll', 'Spotify'] },
+            { name: 'Terceros', type: 'gasto', subcategories: ['Pareja', 'Familia', 'Amigos', 'Préstamos'] },
+            { name: 'Ingresos', type: 'ingreso', subcategories: ['Sueldo', 'Taxi', 'Extras', 'Intereses préstamos'] }
           ];
           defaultCats.forEach(c => addDoc(catRef, c));
         } else {
@@ -100,7 +145,19 @@ export default function App() {
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
       console.error("Error al iniciar sesión:", error);
-      alert("Hubo un error al iniciar sesión. Intenta de nuevo.");
+      alert("Hubo un error al iniciar sesión con Google. Intenta de nuevo.");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleAnonymousLogin = async () => {
+    setIsLoggingIn(true);
+    try {
+      await signInAnonymously(auth);
+    } catch (error) {
+      console.error("Error al iniciar sesión como invitado:", error);
+      alert("Hubo un error al entrar como invitado. Intenta de nuevo.");
     } finally {
       setIsLoggingIn(false);
     }
@@ -112,7 +169,7 @@ export default function App() {
     setCategories([]);
   };
 
-  // Funciones de CRUD
+  // Funciones de CRUD para Transacciones
   const handleAddTransaction = async (e) => {
     e.preventDefault();
     if (!amount || isNaN(amount) || !user || isSubmitting) return;
@@ -122,6 +179,7 @@ export default function App() {
       amount: parseFloat(amount),
       description: description || 'Sin detalle',
       category: category,
+      subcategory: subcategory,
       type: txType,
       date: txDate,
       timestamp: editingId ? transactions.find(t => t.id === editingId)?.timestamp || Date.now() : Date.now() 
@@ -134,7 +192,8 @@ export default function App() {
       } else {
         await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'transactions'), newTx);
       }
-      setAmount(''); setDescription(''); setTxDate(new Date().toISOString().split('T')[0]); setActiveTab('list'); 
+      setAmount(''); setDescription(''); setSubcategory(''); 
+      setTxDate(new Date().toISOString().split('T')[0]); setActiveTab('list'); 
     } catch (error) {
       console.error("Error guardando:", error);
     } finally {
@@ -144,11 +203,13 @@ export default function App() {
 
   const handleEditClick = (tx) => {
     setAmount(tx.amount.toString()); setDescription(tx.description); setTxType(tx.type || 'gasto');
-    setCategory(tx.category); setTxDate(tx.date); setEditingId(tx.id); setActiveTab('add');
+    setCategory(tx.category); setSubcategory(tx.subcategory || ''); 
+    setTxDate(tx.date); setEditingId(tx.id); setActiveTab('add');
   };
 
   const cancelEdit = () => {
-    setEditingId(null); setAmount(''); setDescription(''); setTxType('gasto'); setCategory('');
+    setEditingId(null); setAmount(''); setDescription(''); setTxType('gasto'); 
+    setCategory(''); setSubcategory(''); 
     setTxDate(new Date().toISOString().split('T')[0]); setActiveTab('list');
   };
 
@@ -158,13 +219,18 @@ export default function App() {
     catch (error) { console.error("Error eliminando:", error); }
   };
 
+  // Funciones de CRUD para Categorías y Subcategorías
   const handleAddCategory = async (e) => {
     e.preventDefault();
     if (!newCatName.trim() || !user || isSubmitting) return;
     
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'categories'), { name: newCatName.trim(), type: newCatType });
+      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'categories'), { 
+        name: newCatName.trim(), 
+        type: newCatType,
+        subcategories: [] // Inicializamos con arreglo vacío
+      });
       setNewCatName('');
     } catch (error) { 
       console.error("Error agregando categoría:", error); 
@@ -179,12 +245,40 @@ export default function App() {
     catch (error) { console.error("Error eliminando categoría:", error); }
   };
 
+  const handleAddSubcategory = async (catId) => {
+    const subName = newSubcats[catId];
+    if (!subName || !subName.trim() || !user) return;
+    
+    try {
+      // Usamos arrayUnion para agregar sin duplicar
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'categories', catId), {
+        subcategories: arrayUnion(subName.trim())
+      });
+      setNewSubcats({ ...newSubcats, [catId]: '' }); // Limpiamos el input de esta categoría
+    } catch (error) {
+      console.error("Error agregando subcategoría:", error);
+    }
+  };
+
+  const handleDeleteSubcategory = async (catId, subName) => {
+    if (!user) return;
+    try {
+      // Usamos arrayRemove para quitar exactamente este texto
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'categories', catId), {
+        subcategories: arrayRemove(subName)
+      });
+    } catch (error) {
+      console.error("Error eliminando subcategoría:", error);
+    }
+  };
+
   const exportToExcel = () => {
     if (transactions.length === 0) return;
-    const headers = ['Fecha', 'Tipo', 'Categoría', 'Descripción', 'Monto'];
+    const headers = ['Fecha', 'Tipo', 'Categoría', 'Subcategoría', 'Descripción', 'Monto'];
     const csvRows = transactions.map(tx => {
       const descSegura = tx.description ? tx.description.replace(/,/g, ' ') : '';
-      return `${tx.date},${tx.type === 'ingreso' ? 'Ingreso' : 'Gasto'},${tx.category},${descSegura},${tx.amount.toFixed(2)}`;
+      const subSegura = tx.subcategory ? tx.subcategory.replace(/,/g, ' ') : '';
+      return `${tx.date},${tx.type === 'ingreso' ? 'Ingreso' : 'Gasto'},${tx.category},${subSegura},${descSegura},${tx.amount.toFixed(2)}`;
     });
     const csvContent = [headers.join(','), ...csvRows].join('\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -194,16 +288,16 @@ export default function App() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  // Pantalla de Carga
+  // Pantalla de Carga Global
   if (isLoading) {
     return (
       <div className="flex justify-center bg-gray-100 min-h-screen items-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
+        <LoadingSpinner />
       </div>
     );
   }
 
-  // Pantalla de Login (Si no hay usuario)
+  // Pantalla de Login
   if (!user) {
     return (
       <div className="flex justify-center bg-gray-100 min-h-screen font-sans">
@@ -212,30 +306,60 @@ export default function App() {
             <Wallet size={64} />
           </div>
           <h1 className="text-3xl font-bold text-gray-800 mb-2">Mis Gastos</h1>
-          <p className="text-gray-500 text-center mb-10">Controla tus finanzas personales y sincronízalas en todos tus dispositivos.</p>
+          <p className="text-gray-500 text-center mb-8">Controla tus finanzas personales y sincronízalas en todos tus dispositivos.</p>
           
-          <button 
-            onClick={handleLogin}
-            disabled={isLoggingIn}
-            className="w-full flex items-center justify-center gap-3 bg-white border-2 border-gray-200 text-gray-700 font-bold py-4 px-6 rounded-xl hover:bg-gray-50 transition-colors shadow-sm active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {isLoggingIn ? (
-              <>
-                <Loader2 className="animate-spin text-gray-500" size={24} />
-                Conectando...
-              </>
-            ) : (
-              <>
-                <svg className="w-6 h-6" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                </svg>
-                Ingresar con Google
-              </>
-            )}
-          </button>
+          <div className="w-full space-y-4">
+            <button 
+              onClick={handleLogin}
+              disabled={isLoggingIn}
+              className="w-full flex items-center justify-center gap-3 bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 px-6 rounded-xl hover:bg-gray-50 transition-colors shadow-sm active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {isLoggingIn ? (
+                <>
+                  <LoadingSpinner />
+                  Conectando...
+                </>
+              ) : (
+                <>
+                  <svg className="w-6 h-6" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                  </svg>
+                  Ingresar con Google
+                </>
+              )}
+            </button>
+
+            <div className="relative flex items-center py-2">
+              <div className="flex-grow border-t border-gray-200"></div>
+              <span className="flex-shrink-0 mx-4 text-gray-400 text-xs font-medium uppercase tracking-wider">o también</span>
+              <div className="flex-grow border-t border-gray-200"></div>
+            </div>
+
+            <button 
+              onClick={handleAnonymousLogin}
+              disabled={isLoggingIn}
+              className="w-full flex items-center justify-center gap-3 bg-gray-100 text-gray-700 font-bold py-3 px-6 rounded-xl hover:bg-gray-200 transition-colors shadow-sm active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {isLoggingIn ? (
+                <>
+                  <LoadingSpinner />
+                  Conectando...
+                </>
+              ) : (
+                <>
+                  <User size={22} className="text-gray-600" />
+                  Continuar como Invitado
+                </>
+              )}
+            </button>
+
+            <p className="text-[11px] text-gray-400 text-center mt-6 leading-relaxed px-4">
+              * Si ingresas como invitado, tus datos solo se guardarán en este dispositivo.
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -252,6 +376,10 @@ export default function App() {
     return { category: cat.name, total, percentage: totalGastos > 0 ? (total / totalGastos) * 100 : 0 };
   }).filter(c => c.total > 0).sort((a, b) => b.total - a.total);
 
+  // Obtener la lista dinámica de subcategorías de la categoría seleccionada
+  const currentCatObj = categories.find(c => c.name === category);
+  const currentSubcats = currentCatObj?.subcategories || [];
+
   return (
     <div className="flex justify-center bg-gray-100 min-h-screen font-sans">
       <div className="w-full max-w-md bg-white min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
@@ -262,8 +390,7 @@ export default function App() {
             <Wallet size={24} />
             Mis Gastos
           </h1>
-          {/* Avatar del usuario de Google */}
-          <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.email}`} alt="Perfil" className="w-8 h-8 rounded-full border-2 border-emerald-400" />
+          <img src={user?.photoURL || `https://ui-avatars.com/api/?name=${user?.email ? user.email[0] : 'U'}`} alt="Perfil" className="w-8 h-8 rounded-full border-2 border-emerald-400 bg-emerald-100" />
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 pb-24 bg-gray-50">
@@ -369,11 +496,49 @@ export default function App() {
                   <label className="block text-sm font-medium text-gray-500 mb-3 flex items-center gap-1"><Tag size={14} /> Categoría</label>
                   <div className="flex flex-wrap gap-2">
                     {categories.filter(c => c.type === txType).map(cat => (
-                      <button key={cat.id} type="button" onClick={() => setCategory(cat.name)} className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${category === cat.name ? (txType === 'gasto' ? 'bg-red-500 text-white shadow-md' : 'bg-emerald-600 text-white shadow-md') : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                      <button 
+                        key={cat.id} 
+                        type="button" 
+                        onClick={() => {
+                          setCategory(cat.name);
+                          setSubcategory('');
+                        }} 
+                        className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${category === cat.name ? (txType === 'gasto' ? 'bg-red-500 text-white shadow-md' : 'bg-emerald-600 text-white shadow-md') : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                      >
                         {cat.name}
                       </button>
                     ))}
                   </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                  <label className="block text-sm font-medium text-gray-500 mb-1">Subcategoría (Opcional)</label>
+                  <input 
+                    type="text" 
+                    value={subcategory} 
+                    onChange={(e) => setSubcategory(e.target.value)} 
+                    placeholder="Ej. Desayuno, Gasolina..." 
+                    className="w-full text-gray-800 bg-transparent border-b border-gray-200 focus:outline-none focus:border-emerald-500 py-2 mb-2" 
+                  />
+                  
+                  {category && currentSubcats.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {currentSubcats.map(sub => (
+                        <button
+                          key={sub}
+                          type="button"
+                          onClick={() => setSubcategory(sub)}
+                          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                            subcategory === sub
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100'
+                          }`}
+                        >
+                          {sub}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
@@ -388,7 +553,7 @@ export default function App() {
                 >
                   {isSubmitting ? (
                     <span className="flex items-center justify-center gap-2">
-                      <Loader2 className="animate-spin" size={20} />
+                      <LoadingSpinner />
                       Procesando...
                     </span>
                   ) : (
@@ -418,9 +583,12 @@ export default function App() {
                            {tx.type === 'ingreso' ? <ArrowUpCircle size={20} /> : <ArrowDownCircle size={20} />}
                          </div>
                          <div className="overflow-hidden">
-                           <p className="font-semibold text-gray-800 truncate">{tx.description}</p>
+                           <p className="font-semibold text-gray-800 truncate">{tx.description || 'Sin detalle'}</p>
                            <div className="flex items-center text-xs text-gray-500 gap-2 mt-1">
-                             <span className="bg-gray-100 px-2 py-0.5 rounded-md text-gray-600">{tx.category}</span>
+                             <span className="bg-gray-100 px-2 py-0.5 rounded-md text-gray-600">
+                               {tx.category} 
+                               {tx.subcategory && <span className="font-semibold text-gray-400"> › {tx.subcategory}</span>}
+                             </span>
                              <span>{tx.date}</span>
                            </div>
                          </div>
@@ -446,18 +614,16 @@ export default function App() {
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
               <h2 className="text-2xl font-bold text-gray-800 mb-6">Ajustes</h2>
               
-              {/* Botón de Cierre de Sesión */}
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6 flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-bold text-gray-800">{user.displayName || "Usuario"}</h3>
-                  <p className="text-xs text-gray-500">{user.email}</p>
+                  <h3 className="text-sm font-bold text-gray-800">{user.isAnonymous ? "Modo Invitado" : (user.displayName || "Usuario")}</h3>
+                  <p className="text-xs text-gray-500">{user.isAnonymous ? "Datos locales" : (user?.email || "")}</p>
                 </div>
                 <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-semibold hover:bg-red-100 transition-colors">
                   <LogOut size={16} /> Salir
                 </button>
               </div>
 
-              {/* Botón de Exportación */}
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
                 <h3 className="text-sm font-semibold text-gray-600 mb-3">Exportar Datos</h3>
                 <button onClick={exportToExcel} disabled={transactions.length === 0} className="w-full flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border border-blue-200 py-3 rounded-lg text-sm font-bold hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:hover:bg-blue-50">
@@ -465,43 +631,105 @@ export default function App() {
                 </button>
               </div>
 
-              <form onSubmit={handleAddCategory} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
+              {/* MANTENIMIENTO DE CATEGORÍAS Y SUBCATEGORÍAS */}
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
                 <h3 className="text-sm font-semibold text-gray-600 mb-3">Agregar Nueva Categoría</h3>
-                <div className="flex gap-2 mb-3">
-                  <button type="button" onClick={() => setNewCatType('gasto')} className={`flex-1 py-1.5 text-xs font-bold rounded-md border ${newCatType === 'gasto' ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-gray-200 text-gray-400'}`}>Para Gastos</button>
-                  <button type="button" onClick={() => setNewCatType('ingreso')} className={`flex-1 py-1.5 text-xs font-bold rounded-md border ${newCatType === 'ingreso' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-white border-gray-200 text-gray-400'}`}>Para Ingresos</button>
-                </div>
-                <div className="flex gap-2">
-                  <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Nombre" className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
-                  <button 
-                    type="submit" 
-                    disabled={!newCatName.trim() || isSubmitting} 
-                    className="flex items-center justify-center min-w-[80px] bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-70 disabled:cursor-not-allowed"
-                  >
-                    {isSubmitting ? <Loader2 className="animate-spin" size={16} /> : 'Añadir'}
-                  </button>
-                </div>
-              </form>
-
-              <div className="space-y-4">
-                <div>
-                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Tus Gastos</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {categories.filter(c => c.type === 'gasto').map(cat => (
-                      <div key={cat.id} className="bg-red-50 text-red-700 border border-red-100 px-3 py-1.5 rounded-full text-sm flex items-center gap-2">
-                        {cat.name} <button onClick={() => deleteCategory(cat.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
-                      </div>
-                    ))}
+                <form onSubmit={handleAddCategory} className="mb-4">
+                  <div className="flex gap-2 mb-3">
+                    <button type="button" onClick={() => setNewCatType('gasto')} className={`flex-1 py-1.5 text-xs font-bold rounded-md border ${newCatType === 'gasto' ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-gray-200 text-gray-400'}`}>Para Gastos</button>
+                    <button type="button" onClick={() => setNewCatType('ingreso')} className={`flex-1 py-1.5 text-xs font-bold rounded-md border ${newCatType === 'ingreso' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-white border-gray-200 text-gray-400'}`}>Para Ingresos</button>
                   </div>
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mt-4">Tus Ingresos</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {categories.filter(c => c.type === 'ingreso').map(cat => (
-                      <div key={cat.id} className="bg-emerald-50 text-emerald-700 border border-emerald-100 px-3 py-1.5 rounded-full text-sm flex items-center gap-2">
-                        {cat.name} <button onClick={() => deleteCategory(cat.id)} className="text-emerald-400 hover:text-emerald-600"><Trash2 size={14} /></button>
-                      </div>
-                    ))}
+                  <div className="flex gap-2">
+                    <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Nombre Categoría" className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
+                    <button type="submit" disabled={!newCatName.trim() || isSubmitting} className="flex items-center justify-center min-w-[80px] bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-70 disabled:cursor-not-allowed">
+                      {isSubmitting ? <LoadingSpinner /> : 'Añadir'}
+                    </button>
+                  </div>
+                </form>
+
+                <div className="space-y-4 border-t border-gray-100 pt-4">
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Tus Gastos</h4>
+                    <div className="space-y-3">
+                      {categories.filter(c => c.type === 'gasto').map(cat => (
+                        <div key={cat.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="font-bold text-gray-700">{cat.name}</span>
+                            <button onClick={() => deleteCategory(cat.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                          </div>
+                          
+                          {/* Lista de Subcategorías */}
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            {(cat.subcategories || []).map(sub => (
+                              <span key={sub} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
+                                {sub}
+                                <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
+                              </span>
+                            ))}
+                          </div>
+
+                          {/* Añadir Subcategoría */}
+                          <div className="flex gap-2">
+                            <input 
+                              type="text" 
+                              value={newSubcats[cat.id] || ''} 
+                              onChange={(e) => setNewSubcats({...newSubcats, [cat.id]: e.target.value})} 
+                              placeholder="Nueva subcategoría..." 
+                              className="flex-1 bg-white border border-gray-200 rounded text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-500" 
+                            />
+                            <button 
+                              type="button" 
+                              onClick={() => handleAddSubcategory(cat.id)} 
+                              disabled={!newSubcats[cat.id]?.trim()} 
+                              className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs font-semibold hover:bg-gray-300 disabled:opacity-50"
+                            >
+                              Añadir
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mt-6">Tus Ingresos</h4>
+                    <div className="space-y-3">
+                      {categories.filter(c => c.type === 'ingreso').map(cat => (
+                        <div key={cat.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="font-bold text-gray-700">{cat.name}</span>
+                            <button onClick={() => deleteCategory(cat.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                          </div>
+                          
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            {(cat.subcategories || []).map(sub => (
+                              <span key={sub} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
+                                {sub}
+                                <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
+                              </span>
+                            ))}
+                          </div>
+
+                          <div className="flex gap-2">
+                            <input 
+                              type="text" 
+                              value={newSubcats[cat.id] || ''} 
+                              onChange={(e) => setNewSubcats({...newSubcats, [cat.id]: e.target.value})} 
+                              placeholder="Nueva subcategoría..." 
+                              className="flex-1 bg-white border border-gray-200 rounded text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-500" 
+                            />
+                            <button 
+                              type="button" 
+                              onClick={() => handleAddSubcategory(cat.id)} 
+                              disabled={!newSubcats[cat.id]?.trim()} 
+                              className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs font-semibold hover:bg-gray-300 disabled:opacity-50"
+                            >
+                              Añadir
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
