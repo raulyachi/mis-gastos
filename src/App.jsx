@@ -304,14 +304,16 @@ export default function App() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
+  // PANTALLA DE CARGA (Ajustada a la altura de la pantalla h-dvh)
   if (isLoading) {
-    return <div className="flex justify-center bg-gray-100 min-h-screen items-center"><LoadingSpinner /></div>;
+    return <div className="flex justify-center bg-gray-100 h-dvh items-center"><LoadingSpinner /></div>;
   }
 
+  // PANTALLA DE LOGIN (Ajustada a la altura de la pantalla h-dvh)
   if (!user) {
     return (
-      <div className="flex justify-center bg-gray-100 min-h-screen font-sans">
-        <div className="w-full max-w-md bg-white min-h-screen flex flex-col items-center justify-center p-6 shadow-2xl">
+      <div className="flex justify-center bg-gray-100 h-dvh font-sans overflow-hidden">
+        <div className="w-full max-w-md bg-white h-full flex flex-col items-center justify-center p-6 shadow-2xl overflow-y-auto">
           <div className="bg-emerald-100 p-6 rounded-full text-emerald-600 mb-6"><Wallet size={64} /></div>
           <h1 className="text-3xl font-bold text-gray-800 mb-2">Mis Gastos</h1>
           <p className="text-gray-500 text-center mb-8">Controla tus finanzas personales y sincronízalas en todos tus dispositivos.</p>
@@ -349,16 +351,19 @@ export default function App() {
   const userInitial = user?.email ? user.email.charAt(0).toUpperCase() : 'U';
 
   return (
-    <div className="flex justify-center bg-gray-100 min-h-screen font-sans">
-      <div className="w-full max-w-md bg-white min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
+    // ESTRUCTURA DE APP NATIVA (h-dvh bloquea la altura al tamaño de la pantalla del celular)
+    <div className="flex justify-center bg-gray-100 h-dvh font-sans overflow-hidden">
+      <div className="w-full max-w-md bg-white h-full flex flex-col shadow-2xl relative">
         
-        <header className="bg-emerald-600 text-white p-4 shadow-md z-10 flex justify-between items-center">
+        {/* Cabecera (No hace scroll) */}
+        <header className="bg-emerald-600 text-white p-4 shadow-md z-10 flex justify-between items-center shrink-0">
           <div className="w-6"></div>
           <h1 className="text-xl font-bold flex items-center gap-2"><Wallet size={24} /> Mis Gastos</h1>
           <img src={user?.photoURL || `https://ui-avatars.com/api/?name=${userInitial}&background=random`} alt="Perfil" className="w-8 h-8 rounded-full border-2 border-emerald-400 bg-emerald-100" />
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 pb-24 bg-gray-50">
+        {/* Zona de contenido principal (¡AQUÍ SÍ HAY SCROLL!) */}
+        <main className="flex-1 overflow-y-auto p-4 pb-16 bg-gray-50">
           
           {activeTab !== 'add' && (
             <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 mb-4 flex gap-3 items-end animate-in fade-in">
@@ -378,7 +383,6 @@ export default function App() {
               <div className="bg-gradient-to-br from-emerald-600 to-teal-800 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
                 <p className="text-emerald-100 text-sm font-medium mb-1 mt-2 text-center">Balance del Periodo</p>
                 <h2 className="text-4xl font-bold tracking-tight text-center mb-4">
-                  {/* ARREGLO VISUAL DEL SIGNO NEGATIVO EN EL DASHBOARD */}
                   {balance < 0 ? '-' : ''}S/ {Math.abs(balance).toFixed(2)}
                 </h2>
                 
@@ -512,7 +516,6 @@ export default function App() {
                     const dayTransactions = filteredTransactions.filter(t => t.date === dateKey);
                     const dayTotal = dayTransactions.reduce((sum, tx) => sum + (tx.type === 'ingreso' ? tx.amount : -tx.amount), 0);
                     
-                    // LÓGICA A PRUEBA DE BALAS PARA EL COLOR Y SIGNO DEL DÍA:
                     let dayTotalClass = 'text-gray-600';
                     let dayTotalSign = '';
                     if (dayTotal > 0.001) {
@@ -527,7 +530,6 @@ export default function App() {
                       <div key={dateKey} className="space-y-3">
                         <div className="flex justify-between items-center px-1 border-b border-gray-200 pb-2 mb-2">
                           <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">{formatDateLabel(dateKey)}</h3>
-                          {/* APLICACIÓN DEL COLOR Y SIGNO CORREGIDO */}
                           <span className={`text-xs font-bold ${dayTotalClass}`}>
                             {dayTotalSign}S/ {Math.abs(dayTotal).toFixed(2)}
                           </span>
@@ -663,7 +665,8 @@ export default function App() {
           )}
         </main>
 
-        <nav className="bg-white border-t border-gray-200 absolute bottom-0 w-full pb-safe">
+        {/* Barra de navegación inferior (Fija y no hace scroll) */}
+        <nav className="bg-white border-t border-gray-200 w-full shrink-0 z-50 pb-safe">
           <div className="flex justify-around items-center p-2">
             <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center p-2 w-16 ${activeTab === 'dashboard' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'}`}><LayoutDashboard size={24} strokeWidth={activeTab === 'dashboard' ? 2.5 : 2} /> <span className="text-[10px] mt-1 font-medium">Inicio</span></button>
             <button onClick={() => setActiveTab('list')} className={`flex flex-col items-center p-2 w-16 ${activeTab === 'list' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'}`}><List size={24} strokeWidth={activeTab === 'list' ? 2.5 : 2} /> <span className="text-[10px] mt-1 font-medium">Historial</span></button>
