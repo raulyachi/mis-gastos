@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, List, LayoutDashboard, Trash2, Wallet, Tag, ArrowDownCircle, ArrowUpCircle, Calendar, Settings, Pencil, Download, LogOut, User, Utensils, Car, Gamepad2, ShoppingBag, Zap, Smartphone, Users, DollarSign } from 'lucide-react';
+import { PlusCircle, List, LayoutDashboard, Trash2, Wallet, Tag, ArrowDownCircle, ArrowUpCircle, Calendar, Settings, Pencil, Download, LogOut, User, Utensils, Car, Gamepad2, ShoppingBag, Zap, Smartphone, Users, DollarSign, TrendingUp, TrendingDown, Bookmark, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, signInWithCustomToken, signInAnonymously } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
@@ -68,6 +68,7 @@ const getInitialDates = () => {
 
 // Formateador de fechas
 const formatDateLabel = (dateString) => {
+  if (!dateString) return '';
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
@@ -79,29 +80,48 @@ const formatDateLabel = (dateString) => {
   if (dateString === yesterdayStr) return 'Ayer';
 
   const dateObj = new Date(`${dateString}T12:00:00`);
-  return dateObj.toLocaleDateString('es-ES', { month: 'long', day: 'numeric' });
+  return dateObj.toLocaleDateString('es-ES', { month: 'short', day: 'numeric' });
 };
 
 export default function App() {
   const [transactions, setTransactions] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [periods, setPeriods] = useState([]); 
+  
   const [activeTab, setActiveTab] = useState('dashboard');
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   
-  // Estado para el filtro de fechas (con memoria)
+  // Estado para el filtro de fechas principal
   const initDates = getInitialDates();
   const [filterStartDate, setFilterStartDate] = useState(() => localStorage.getItem('gastos_filterStartDate') || initDates.start);
   const [filterEndDate, setFilterEndDate] = useState(() => localStorage.getItem('gastos_filterEndDate') || initDates.end);
+
+  // NUEVO: Estados exclusivos para las fechas de exportación a Excel
+  const [exportStartDate, setExportStartDate] = useState(initDates.start);
+  const [exportEndDate, setExportEndDate] = useState(initDates.end);
 
   useEffect(() => {
     localStorage.setItem('gastos_filterStartDate', filterStartDate);
     localStorage.setItem('gastos_filterEndDate', filterEndDate);
   }, [filterStartDate, filterEndDate]);
 
-  // Estado de formularios
+  // Estados para el MODAL de Nuevo Ciclo de Pago
+  const [showPeriodModal, setShowPeriodModal] = useState(false);
+  const [modalPeriodName, setModalPeriodName] = useState('');
+  const [modalStartDate, setModalStartDate] = useState('');
+  const [modalEndDate, setModalEndDate] = useState('');
+
+  const openPeriodModal = () => {
+    setModalPeriodName('');
+    setModalStartDate(filterStartDate);
+    setModalEndDate(filterEndDate);
+    setShowPeriodModal(true);
+  };
+
+  // Estado de formularios de transacción
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [txType, setTxType] = useState('gasto');
@@ -112,10 +132,14 @@ export default function App() {
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   });
 
+  // Estados para Categorías y Ajustes
   const [newCatName, setNewCatName] = useState('');
   const [newCatType, setNewCatType] = useState('gasto');
   const [newSubcats, setNewSubcats] = useState({}); 
+  
   const [editingId, setEditingId] = useState(null);
+  const [expandedCategory, setExpandedCategory] = useState(null);
+  const [activeSettingsTab, setActiveSettingsTab] = useState('account');
 
   useEffect(() => {
     setCategory('');
@@ -151,10 +175,12 @@ export default function App() {
     if (!user) return;
     let unsubTx = () => {};
     let unsubCat = () => {};
+    let unsubPer = () => {};
 
     try {
       const txRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
       const catRef = collection(db, 'artifacts', appId, 'users', user.uid, 'categories');
+      const perRef = collection(db, 'artifacts', appId, 'users', user.uid, 'periods'); 
       
       unsubTx = onSnapshot(txRef, (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -179,10 +205,18 @@ export default function App() {
           setCategories(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }
       }, (error) => console.error("Error categorias:", error));
+
+      unsubPer = onSnapshot(perRef, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Ordenar por fecha de inicio descendente (los meses más recientes arriba)
+        data.sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+        setPeriods(data);
+      }, (error) => console.error("Error periodos:", error));
+
     } catch (e) {
       console.error("Error Firebase:", e);
     }
-    return () => { unsubTx(); unsubCat(); };
+    return () => { unsubTx(); unsubCat(); unsubPer(); };
   }, [user]);
 
   const handleLogin = async () => {
@@ -203,6 +237,7 @@ export default function App() {
     signOut(auth);
     setTransactions([]);
     setCategories([]);
+    setPeriods([]);
   };
 
   const handleAddTransaction = async (e) => {
@@ -280,36 +315,180 @@ export default function App() {
     } catch (error) { console.error(error); }
   };
 
+  const handleAddPeriod = async (e) => {
+    e.preventDefault();
+    if (!modalPeriodName.trim() || !user || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'periods'), { 
+        name: modalPeriodName.trim(), 
+        start: modalStartDate, 
+        end: modalEndDate,
+        timestamp: Date.now()
+      });
+      setShowPeriodModal(false);
+      setModalPeriodName('');
+    } catch (error) { console.error("Error guardando periodo:", error); } 
+    finally { setIsSubmitting(false); }
+  };
+
+  const deletePeriod = async (id) => {
+    if (!user) return;
+    try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'periods', id)); } 
+    catch (error) { console.error(error); }
+  };
+
+  // 1. FILTRADO DEL PERIODO ACTUAL
   const filteredTransactions = transactions.filter(t => {
     if (filterStartDate && t.date < filterStartDate) return false;
     if (filterEndDate && t.date > filterEndDate) return false;
     return true;
   });
 
-  const exportToExcel = () => {
-    if (filteredTransactions.length === 0) return;
-    const headers = ['Fecha', 'Tipo', 'Categoría', 'Subcategoría', 'Descripción', 'Monto'];
-    const csvRows = filteredTransactions.map(tx => {
-      const descSegura = tx.description ? tx.description.replace(/,/g, ' ') : '';
-      const subSegura = tx.subcategory ? tx.subcategory.replace(/,/g, ' ') : '';
-      return `${tx.date},${tx.type === 'ingreso' ? 'Ingreso' : 'Gasto'},${tx.category},${subSegura},${descSegura},${tx.amount.toFixed(2)}`;
+  // 2. CÁLCULO INTELIGENTE DEL PERIODO ANTERIOR (Fórmula Corregida y Segura)
+  const getPreviousPeriodInfo = () => {
+    if (!filterStartDate || !filterEndDate) return null;
+
+    const currentCycleIndex = periods.findIndex(
+      p => p.start === filterStartDate && p.end === filterEndDate
+    );
+
+    if (currentCycleIndex !== -1) {
+      const prevCycle = periods[currentCycleIndex + 1];
+      if (prevCycle) {
+        return {
+          type: 'cycle',
+          name: prevCycle.name,
+          start: prevCycle.start,
+          end: prevCycle.end
+        };
+      } else {
+        return null;
+      }
+    }
+
+    // Fórmula segura para restar exactamente 1 mes en el calendario real
+    const subtractOneMonthSafe = (dateStr) => {
+      const [year, month, day] = dateStr.split('-').map(Number);
+      let newYear = year;
+      let newMonth = month - 1;
+      
+      if (newMonth === 0) {
+        newMonth = 12;
+        newYear -= 1;
+      }
+      
+      // Obtenemos cuántos días reales tiene ese mes específico (ej. Febrero 2026 tiene 28)
+      const daysInNewMonth = new Date(newYear, newMonth, 0).getDate();
+      // Si el día original era 31, y el nuevo mes solo tiene 28, usamos el 28 para evitar errores
+      const newDay = Math.min(day, daysInNewMonth);
+
+      return `${newYear}-${String(newMonth).padStart(2, '0')}-${String(newDay).padStart(2, '0')}`;
+    };
+
+    return {
+      type: 'manual',
+      start: subtractOneMonthSafe(filterStartDate),
+      end: subtractOneMonthSafe(filterEndDate)
+    };
+  };
+
+  const prevPeriodInfo = getPreviousPeriodInfo();
+  const prevTransactions = prevPeriodInfo ? transactions.filter(t => t.date >= prevPeriodInfo.start && t.date <= prevPeriodInfo.end) : [];
+
+  const totalIngresos = filteredTransactions.filter(t => t.type === 'ingreso').reduce((sum, e) => sum + e.amount, 0);
+  const totalGastos = filteredTransactions.filter(t => t.type === 'gasto' || !t.type).reduce((sum, e) => sum + e.amount, 0);
+  const balance = totalIngresos - totalGastos;
+  const healthPercentage = totalIngresos > 0 ? Math.min((totalGastos / totalIngresos) * 100, 100) : (totalGastos > 0 ? 100 : 0);
+
+  const prevTotalIngresos = prevTransactions.filter(t => t.type === 'ingreso').reduce((sum, e) => sum + e.amount, 0);
+  const prevTotalGastos = prevTransactions.filter(t => t.type === 'gasto' || !t.type).reduce((sum, e) => sum + e.amount, 0);
+
+  const calcTrend = (current, prev) => {
+    if (prev === 0) return current > 0 ? 100 : 0;
+    return ((current - prev) / prev) * 100;
+  };
+  const gastosTrend = calcTrend(totalGastos, prevTotalGastos);
+  const ingresosTrend = calcTrend(totalIngresos, prevTotalIngresos);
+
+  const expensesByCategory = categories.filter(c => c.type === 'gasto').map(cat => {
+    const catTx = filteredTransactions.filter(e => e.category === cat.name && (e.type === 'gasto' || !e.type));
+    const total = catTx.reduce((sum, e) => sum + e.amount, 0);
+    
+    const subcatMap = {};
+    catTx.forEach(tx => {
+      const sub = tx.subcategory || 'Otros';
+      subcatMap[sub] = (subcatMap[sub] || 0) + tx.amount;
     });
-    const csvContent = [headers.join(','), ...csvRows].join('\n');
+    
+    const subcategoriesList = Object.keys(subcatMap).map(name => ({
+      name,
+      total: subcatMap[name],
+      percentage: total > 0 ? (subcatMap[name] / total) * 100 : 0
+    })).sort((a, b) => b.total - a.total);
+
+    return { 
+      category: cat.name, 
+      total, 
+      percentage: totalGastos > 0 ? (total / totalGastos) * 100 : 0,
+      subcategories: subcategoriesList 
+    };
+  }).filter(c => c.total > 0).sort((a, b) => b.total - a.total);
+
+  const currentCatObj = categories.find(c => c.name === category);
+  const currentSubcats = currentCatObj?.subcategories || [];
+  const userInitial = user?.email ? user.email.charAt(0).toUpperCase() : 'U';
+
+  const exportToExcel = () => {
+    // 1. Filtramos independientemente usando las fechas exclusivas de exportación
+    const txToExport = transactions.filter(t => {
+      if (exportStartDate && t.date < exportStartDate) return false;
+      if (exportEndDate && t.date > exportEndDate) return false;
+      return true;
+    });
+
+    if (txToExport.length === 0) {
+      alert("No hay transacciones en el rango de fechas seleccionado para exportar.");
+      return;
+    }
+
+    // 2. Función auxiliar para encontrar a qué ciclo pertenece una fecha
+    const getCycleForDate = (dateStr) => {
+      const matchingPeriod = periods.find(p => dateStr >= p.start && dateStr <= p.end);
+      return matchingPeriod ? matchingPeriod.name : 'Ninguno';
+    };
+
+    // 3. Añadimos la columna 'Ciclo' a las cabeceras
+    const headers = ['Fecha', 'Ciclo', 'Tipo', 'Categoría', 'Subcategoría', 'Descripción', 'Monto'];
+    
+    const csvRows = txToExport.map(tx => {
+      const descSegura = tx.description ? tx.description.replace(/"/g, '""') : '';
+      const subSegura = tx.subcategory ? tx.subcategory.replace(/"/g, '""') : '';
+      const catSegura = tx.category ? tx.category.replace(/"/g, '""') : '';
+      // Evaluamos el ciclo automáticamente
+      const cicloSeguro = getCycleForDate(tx.date).replace(/"/g, '""');
+      
+      // Formato con punto y coma para Excel en español, incluyendo el ciclo
+      return `"${tx.date}";"${cicloSeguro}";"${tx.type === 'ingreso' ? 'Ingreso' : 'Gasto'}";"${catSegura}";"${subSegura}";"${descSegura}";"${tx.amount.toFixed(2)}"`;
+    });
+    
+    const headerRow = headers.map(h => `"${h}"`).join(';');
+    const csvContent = [headerRow, ...csvRows].join('\n');
+    
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    let fileName = `Mis_Gastos`;
-    if (filterStartDate && filterEndDate) fileName += `_${filterStartDate}_al_${filterEndDate}`;
-    link.setAttribute('download', `${fileName}.csv`);
+    
+    let fileName = `Mis_Gastos_${exportStartDate}_al_${exportEndDate}.csv`;
+    link.setAttribute('download', fileName);
+    
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  // PANTALLA DE CARGA (Ajustada a la altura de la pantalla h-dvh)
   if (isLoading) {
     return <div className="flex justify-center bg-gray-100 h-dvh items-center"><LoadingSpinner /></div>;
   }
 
-  // PANTALLA DE LOGIN (Ajustada a la altura de la pantalla h-dvh)
   if (!user) {
     return (
       <div className="flex justify-center bg-gray-100 h-dvh font-sans overflow-hidden">
@@ -336,44 +515,57 @@ export default function App() {
     );
   }
 
-  const totalIngresos = filteredTransactions.filter(t => t.type === 'ingreso').reduce((sum, e) => sum + e.amount, 0);
-  const totalGastos = filteredTransactions.filter(t => t.type === 'gasto' || !t.type).reduce((sum, e) => sum + e.amount, 0);
-  const balance = totalIngresos - totalGastos;
-  const healthPercentage = totalIngresos > 0 ? Math.min((totalGastos / totalIngresos) * 100, 100) : (totalGastos > 0 ? 100 : 0);
-
-  const expensesByCategory = categories.filter(c => c.type === 'gasto').map(cat => {
-    const total = filteredTransactions.filter(e => e.category === cat.name && (e.type === 'gasto' || !e.type)).reduce((sum, e) => sum + e.amount, 0);
-    return { category: cat.name, total, percentage: totalGastos > 0 ? (total / totalGastos) * 100 : 0 };
-  }).filter(c => c.total > 0).sort((a, b) => b.total - a.total);
-
-  const currentCatObj = categories.find(c => c.name === category);
-  const currentSubcats = currentCatObj?.subcategories || [];
-  const userInitial = user?.email ? user.email.charAt(0).toUpperCase() : 'U';
-
   return (
-    // ESTRUCTURA DE APP NATIVA (h-dvh bloquea la altura al tamaño de la pantalla del celular)
     <div className="flex justify-center bg-gray-100 h-dvh font-sans overflow-hidden">
       <div className="w-full max-w-md bg-white h-full flex flex-col shadow-2xl relative">
         
-        {/* Cabecera (No hace scroll) */}
         <header className="bg-emerald-600 text-white p-4 shadow-md z-10 flex justify-between items-center shrink-0">
           <div className="w-6"></div>
           <h1 className="text-xl font-bold flex items-center gap-2"><Wallet size={24} /> Mis Gastos</h1>
           <img src={user?.photoURL || `https://ui-avatars.com/api/?name=${userInitial}&background=random`} alt="Perfil" className="w-8 h-8 rounded-full border-2 border-emerald-400 bg-emerald-100" />
         </header>
 
-        {/* Zona de contenido principal (¡AQUÍ SÍ HAY SCROLL!) */}
         <main className="flex-1 overflow-y-auto p-4 pb-16 bg-gray-50">
           
           {activeTab !== 'add' && (
-            <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 mb-4 flex gap-3 items-end animate-in fade-in">
-              <div className="flex-1">
-                <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1 flex items-center gap-1"><Calendar size={10}/> Desde</label>
-                <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-700 focus:outline-none focus:border-emerald-500" />
-              </div>
-              <div className="flex-1">
-                <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1 flex items-center gap-1"><Calendar size={10}/> Hasta</label>
-                <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-700 focus:outline-none focus:border-emerald-500" />
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 mb-4 animate-in fade-in">
+              
+              {periods.length > 0 && (
+                <div className="relative mb-3">
+                  <select 
+                    value={periods.find(p => p.start === filterStartDate && p.end === filterEndDate)?.id || 'custom'}
+                    className="w-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-lg p-2.5 pr-8 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 appearance-none transition-colors cursor-pointer"
+                    onChange={(e) => {
+                      if (e.target.value === 'custom') return;
+                      const selected = periods.find(p => p.id === e.target.value);
+                      if (selected) {
+                        setFilterStartDate(selected.start);
+                        setFilterEndDate(selected.end);
+                      }
+                    }}
+                  >
+                    <option value="custom" className="text-gray-500 font-medium">⚙️ Periodo Personalizado (Manual)</option>
+                    {periods.map(p => (
+                      <option key={p.id} value={p.id} className="font-bold text-gray-800">
+                        Ciclo: {p.name} ({formatDateLabel(p.start)} - {formatDateLabel(p.end)})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-emerald-600">
+                    <ChevronDown size={16} strokeWidth={2.5} />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 items-end">
+                <div className="flex-1">
+                  <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1 flex items-center gap-1"><Calendar size={10}/> Desde</label>
+                  <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-700 focus:outline-none focus:border-emerald-500" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1 flex items-center gap-1"><Calendar size={10}/> Hasta</label>
+                  <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-700 focus:outline-none focus:border-emerald-500" />
+                </div>
               </div>
             </div>
           )}
@@ -407,6 +599,60 @@ export default function App() {
                 </div>
               </div>
 
+              {prevPeriodInfo && prevTransactions.length > 0 && (
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-gray-700 font-semibold text-sm flex items-center gap-1.5">
+                      <TrendingUp size={16} className="text-gray-400" />
+                      Progreso
+                    </h3>
+                    <span className="text-[9px] text-gray-500 font-medium bg-gray-50 px-2 py-0.5 rounded border border-gray-200 max-w-[150px] truncate">
+                      vs. {prevPeriodInfo.type === 'cycle' ? `Ciclo: ${prevPeriodInfo.name}` : `${formatDateLabel(prevPeriodInfo.start)} - ${formatDateLabel(prevPeriodInfo.end)}`}
+                    </span>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between items-end mb-1.5">
+                        <span className="text-xs text-gray-500 font-medium">Tus Gastos</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-bold text-gray-800">S/ {totalGastos.toFixed(2)}</span>
+                          {gastosTrend !== 0 && (
+                            <span className={`text-[10px] flex items-center px-1.5 py-0.5 rounded-md font-bold ${gastosTrend > 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                              {gastosTrend > 0 ? <TrendingUp size={10} className="mr-0.5" /> : <TrendingDown size={10} className="mr-0.5" />}
+                              {Math.abs(gastosTrend).toFixed(1)}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="bg-red-400 rounded-full transition-all duration-1000" style={{ width: `${Math.min((totalGastos / Math.max(totalGastos, prevTotalGastos, 1)) * 100, 100)}%` }}></div>
+                      </div>
+                      <div className="text-[9px] text-gray-400 mt-1.5 text-right">En {prevPeriodInfo.type === 'cycle' ? 'ciclo' : 'periodo'} anterior: S/ {prevTotalGastos.toFixed(2)}</div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-end mb-1.5">
+                        <span className="text-xs text-gray-500 font-medium">Tus Ingresos</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-bold text-gray-800">S/ {totalIngresos.toFixed(2)}</span>
+                          {ingresosTrend !== 0 && (
+                            <span className={`text-[10px] flex items-center px-1.5 py-0.5 rounded-md font-bold ${ingresosTrend > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                              {ingresosTrend > 0 ? <TrendingUp size={10} className="mr-0.5" /> : <TrendingDown size={10} className="mr-0.5" />}
+                              {Math.abs(ingresosTrend).toFixed(1)}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="bg-emerald-400 rounded-full transition-all duration-1000" style={{ width: `${Math.min((totalIngresos / Math.max(totalIngresos, prevTotalIngresos, 1)) * 100, 100)}%` }}></div>
+                      </div>
+                      <div className="text-[9px] text-gray-400 mt-1.5 text-right">En {prevPeriodInfo.type === 'cycle' ? 'ciclo' : 'periodo'} anterior: S/ {prevTotalIngresos.toFixed(2)}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <h3 className="text-gray-700 font-semibold mb-3 px-1">Distribución de Gastos</h3>
                 {expensesByCategory.length === 0 ? (
@@ -414,18 +660,39 @@ export default function App() {
                 ) : (
                   <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-2 space-y-1">
                     {expensesByCategory.map((item, index) => (
-                      <div key={index} className="p-3 hover:bg-gray-50 rounded-lg transition-colors">
-                        <div className="flex justify-between items-center mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="bg-red-50 p-1.5 rounded-md text-red-500">{getCategoryIcon(item.category, 14)}</div>
-                            <span className="font-medium text-gray-700 text-sm">{item.category}</span>
+                      <div key={index} className="bg-white rounded-lg border border-transparent hover:border-gray-100 overflow-hidden mb-1 transition-all">
+                        <div onClick={() => setExpandedCategory(expandedCategory === item.category ? null : item.category)} className="p-2 hover:bg-gray-50 transition-colors cursor-pointer">
+                          <div className="flex justify-between items-center mb-2">
+                            <div className="flex items-center gap-2">
+                              <div className="bg-red-50 p-1.5 rounded-md text-red-500">{getCategoryIcon(item.category, 14)}</div>
+                              <span className="font-medium text-gray-700 text-sm">{item.category}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-right">
+                              <div>
+                                <span className="font-semibold text-gray-900 block text-sm">S/ {item.total.toFixed(2)}</span>
+                                <span className="text-[10px] text-gray-400 font-medium">{item.percentage.toFixed(1)}%</span>
+                              </div>
+                              {expandedCategory === item.category ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <span className="font-semibold text-gray-900 block text-sm">S/ {item.total.toFixed(2)}</span>
-                            <span className="text-[10px] text-gray-400 font-medium">{item.percentage.toFixed(1)}%</span>
-                          </div>
+                          <div className="w-full bg-gray-100 rounded-full h-1.5"><div className="bg-red-400 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${item.percentage}%` }}></div></div>
                         </div>
-                        <div className="w-full bg-gray-100 rounded-full h-1.5"><div className="bg-red-400 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${item.percentage}%` }}></div></div>
+
+                        {expandedCategory === item.category && item.subcategories.length > 0 && (
+                          <div className="bg-gray-50 px-3 py-2.5 border-t border-gray-100 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                            {item.subcategories.map((sub, idx) => (
+                              <div key={idx} className="flex justify-between items-center text-xs">
+                                <span className="text-gray-600 flex items-center gap-1.5">
+                                  <div className="w-1 h-1 bg-red-300 rounded-full"></div>
+                                  {sub.name}
+                                </span>
+                                <span className="font-medium text-gray-800">
+                                  S/ {sub.total.toFixed(2)} <span className="text-[9px] text-gray-400 font-normal ml-1">({sub.percentage.toFixed(0)}%)</span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -574,98 +841,186 @@ export default function App() {
 
           {activeTab === 'categories' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <h2 className="text-2xl font-bold text-gray-800 mb-6">Ajustes</h2>
-              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6 flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-gray-800">{user.isAnonymous ? "Modo Invitado" : (user.displayName || "Usuario")}</h3>
-                  <p className="text-xs text-gray-500">{user.isAnonymous ? "Datos locales" : (user?.email || "")}</p>
-                </div>
-                <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-semibold hover:bg-red-100 transition-colors">
-                  <LogOut size={16} /> Salir
+              <h2 className="text-2xl font-bold text-gray-800 mb-4">Ajustes</h2>
+
+              <div className="flex gap-2 mb-6 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                <button 
+                  onClick={() => setActiveSettingsTab('account')}
+                  className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all ${activeSettingsTab === 'account' ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
+                >
+                  👤 Mi Cuenta
                 </button>
-              </div>
-              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
-                <h3 className="text-sm font-semibold text-gray-600 mb-3">Exportar Datos</h3>
-                <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">Se descargará un archivo de Excel con los datos de las fechas que tengas seleccionadas arriba (Desde/Hasta).</p>
-                <button onClick={exportToExcel} disabled={filteredTransactions.length === 0} className="w-full flex items-center justify-center gap-2 bg-blue-50 text-blue-600 border border-blue-200 py-3 rounded-lg text-sm font-bold hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:hover:bg-blue-50">
-                  <Download size={18} /> Descargar en Excel (CSV)
+                <button 
+                  onClick={() => setActiveSettingsTab('cycles')}
+                  className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all ${activeSettingsTab === 'cycles' ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
+                >
+                  🔄 Ciclos de Pago
+                </button>
+                <button 
+                  onClick={() => setActiveSettingsTab('categories')}
+                  className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all ${activeSettingsTab === 'categories' ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
+                >
+                  🏷️ Categorías
                 </button>
               </div>
 
-              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
-                <h3 className="text-sm font-semibold text-gray-600 mb-3">Agregar Nueva Categoría</h3>
-                <form onSubmit={handleAddCategory} className="mb-4">
-                  <div className="flex gap-2 mb-3">
-                    <button type="button" onClick={() => setNewCatType('gasto')} className={`flex-1 py-1.5 text-xs font-bold rounded-md border ${newCatType === 'gasto' ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-gray-200 text-gray-400'}`}>Para Gastos</button>
-                    <button type="button" onClick={() => setNewCatType('ingreso')} className={`flex-1 py-1.5 text-xs font-bold rounded-md border ${newCatType === 'ingreso' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-white border-gray-200 text-gray-400'}`}>Para Ingresos</button>
-                  </div>
-                  <div className="flex gap-2">
-                    <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Nombre Categoría" className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
-                    <button type="submit" disabled={!newCatName.trim() || isSubmitting} className="flex items-center justify-center min-w-[80px] bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-70 disabled:cursor-not-allowed">
-                      {isSubmitting ? <LoadingSpinner /> : 'Añadir'}
+              {activeSettingsTab === 'account' && (
+                <div className="animate-in fade-in duration-300">
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-800">{user.isAnonymous ? "Modo Invitado" : (user.displayName || "Usuario")}</h3>
+                      <p className="text-xs text-gray-500">{user.isAnonymous ? "Datos locales" : (user?.email || "")}</p>
+                    </div>
+                    <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-semibold hover:bg-red-100 transition-colors">
+                      <LogOut size={16} /> Salir
                     </button>
                   </div>
-                </form>
-
-                <div className="space-y-4 border-t border-gray-100 pt-4">
-                  <div>
-                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Tus Gastos</h4>
-                    <div className="space-y-3">
-                      {categories.filter(c => c.type === 'gasto').map(cat => (
-                        <div key={cat.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="font-bold text-gray-700">{cat.name}</span>
-                            <button onClick={() => deleteCategory(cat.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5 mb-3">
-                            {(cat.subcategories || []).map((sub, idx) => (
-                              <span key={idx} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
-                                {sub}
-                                <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
-                              </span>
-                            ))}
-                          </div>
-                          <div className="flex gap-2">
-                            <input type="text" value={newSubcats[cat.id] || ''} onChange={(e) => setNewSubcats({...newSubcats, [cat.id]: e.target.value})} placeholder="Nueva subcategoría..." className="flex-1 bg-white border border-gray-200 rounded text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-500" />
-                            <button type="button" onClick={() => handleAddSubcategory(cat.id)} disabled={!newSubcats[cat.id]?.trim()} className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs font-semibold hover:bg-gray-300 disabled:opacity-50">Añadir</button>
-                          </div>
-                        </div>
-                      ))}
+                  
+                  {/* NUEVA SECCIÓN DE EXPORTACIÓN CON FECHAS INDEPENDIENTES */}
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
+                    <h3 className="text-sm font-semibold text-gray-600 mb-3 flex items-center gap-2">
+                      <Download size={16} className="text-blue-600"/>
+                      Exportar a Excel (CSV)
+                    </h3>
+                    <p className="text-[11px] text-gray-500 mb-4 leading-relaxed">
+                      Selecciona el rango de fechas que deseas descargar. El archivo incluirá una columna automática indicando a qué Ciclo de Pago pertenece cada gasto.
+                    </p>
+                    
+                    <div className="flex gap-3 items-end mb-5">
+                      <div className="flex-1">
+                        <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1 flex items-center gap-1"><Calendar size={10}/> Desde</label>
+                        <input type="date" value={exportStartDate} onChange={e => setExportStartDate(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-700 focus:outline-none focus:border-blue-500" />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1 flex items-center gap-1"><Calendar size={10}/> Hasta</label>
+                        <input type="date" value={exportEndDate} onChange={e => setExportEndDate(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-700 focus:outline-none focus:border-blue-500" />
+                      </div>
                     </div>
-                  </div>
 
-                  <div>
-                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mt-6">Tus Ingresos</h4>
-                    <div className="space-y-3">
-                      {categories.filter(c => c.type === 'ingreso').map(cat => (
-                        <div key={cat.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="font-bold text-gray-700">{cat.name}</span>
-                            <button onClick={() => deleteCategory(cat.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                    <button 
+                      onClick={exportToExcel} 
+                      className="w-full flex items-center justify-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 py-3 rounded-xl text-sm font-bold hover:bg-blue-100 transition-colors active:scale-95"
+                    >
+                      <Download size={18} /> Descargar Archivo
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {activeSettingsTab === 'cycles' && (
+                <div className="animate-in fade-in duration-300">
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
+                    <h3 className="text-sm font-semibold text-gray-600 mb-1 flex items-center gap-2">
+                      <Bookmark size={16} className="text-emerald-600"/>
+                      Mis Ciclos de Pago Guardados
+                    </h3>
+                    <p className="text-[11px] text-gray-500 mb-4 leading-relaxed">
+                      Guarda las fechas de tus quincenas o meses para cambiar rápidamente entre ellos en la pantalla de Inicio.
+                    </p>
+
+                    <button 
+                      onClick={openPeriodModal} 
+                      className="w-full flex items-center justify-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 py-2.5 rounded-lg text-sm font-bold hover:bg-emerald-100 transition-colors mb-4"
+                    >
+                      <PlusCircle size={16} /> Nuevo Ciclo
+                    </button>
+
+                    {periods.length === 0 ? (
+                      <p className="text-center text-sm text-gray-400 py-4">Aún no tienes ciclos guardados.</p>
+                    ) : (
+                      <div className="space-y-2 border-t border-gray-100 pt-3">
+                        {periods.map(p => (
+                          <div key={p.id} className="flex justify-between items-center bg-gray-50 border border-gray-200 p-2.5 rounded-lg">
+                            <div>
+                              <p className="font-bold text-xs text-gray-700">{p.name}</p>
+                              <p className="text-[10px] text-gray-500">{formatDateLabel(p.start)} al {formatDateLabel(p.end)}</p>
+                            </div>
+                            <button onClick={() => deletePeriod(p.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={14}/></button>
                           </div>
-                          <div className="flex flex-wrap gap-1.5 mb-3">
-                            {(cat.subcategories || []).map((sub, idx) => (
-                              <span key={idx} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
-                                {sub}
-                                <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
-                              </span>
-                            ))}
-                          </div>
-                          <div className="flex gap-2">
-                            <input type="text" value={newSubcats[cat.id] || ''} onChange={(e) => setNewSubcats({...newSubcats, [cat.id]: e.target.value})} placeholder="Nueva subcategoría..." className="flex-1 bg-white border border-gray-200 rounded text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-500" />
-                            <button type="button" onClick={() => handleAddSubcategory(cat.id)} disabled={!newSubcats[cat.id]?.trim()} className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs font-semibold hover:bg-gray-300 disabled:opacity-50">Añadir</button>
-                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeSettingsTab === 'categories' && (
+                <div className="animate-in fade-in duration-300">
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
+                    <h3 className="text-sm font-semibold text-gray-600 mb-3">Agregar Nueva Categoría</h3>
+                    <form onSubmit={handleAddCategory} className="mb-4">
+                      <div className="flex gap-2 mb-3">
+                        <button type="button" onClick={() => setNewCatType('gasto')} className={`flex-1 py-1.5 text-xs font-bold rounded-md border ${newCatType === 'gasto' ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-gray-200 text-gray-400'}`}>Para Gastos</button>
+                        <button type="button" onClick={() => setNewCatType('ingreso')} className={`flex-1 py-1.5 text-xs font-bold rounded-md border ${newCatType === 'ingreso' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-white border-gray-200 text-gray-400'}`}>Para Ingresos</button>
+                      </div>
+                      <div className="flex gap-2">
+                        <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Nombre Categoría" className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
+                        <button type="submit" disabled={!newCatName.trim() || isSubmitting} className="flex items-center justify-center min-w-[80px] bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-70 disabled:cursor-not-allowed">
+                          {isSubmitting ? <LoadingSpinner /> : 'Añadir'}
+                        </button>
+                      </div>
+                    </form>
+
+                    <div className="space-y-4 border-t border-gray-100 pt-4">
+                      <div>
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Tus Gastos</h4>
+                        <div className="space-y-3">
+                          {categories.filter(c => c.type === 'gasto').map(cat => (
+                            <div key={cat.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="font-bold text-gray-700">{cat.name}</span>
+                                <button onClick={() => deleteCategory(cat.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5 mb-3">
+                                {(cat.subcategories || []).map((sub, idx) => (
+                                  <span key={idx} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
+                                    {sub}
+                                    <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="flex gap-2">
+                                <input type="text" value={newSubcats[cat.id] || ''} onChange={(e) => setNewSubcats({...newSubcats, [cat.id]: e.target.value})} placeholder="Nueva subcategoría..." className="flex-1 bg-white border border-gray-200 rounded text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-500" />
+                                <button type="button" onClick={() => handleAddSubcategory(cat.id)} disabled={!newSubcats[cat.id]?.trim()} className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs font-semibold hover:bg-gray-300 disabled:opacity-50">Añadir</button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      </div>
+
+                      <div>
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mt-6">Tus Ingresos</h4>
+                        <div className="space-y-3">
+                          {categories.filter(c => c.type === 'ingreso').map(cat => (
+                            <div key={cat.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="font-bold text-gray-700">{cat.name}</span>
+                                <button onClick={() => deleteCategory(cat.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5 mb-3">
+                                {(cat.subcategories || []).map((sub, idx) => (
+                                  <span key={idx} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
+                                    {sub}
+                                    <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="flex gap-2">
+                                <input type="text" value={newSubcats[cat.id] || ''} onChange={(e) => setNewSubcats({...newSubcats, [cat.id]: e.target.value})} placeholder="Nueva subcategoría..." className="flex-1 bg-white border border-gray-200 rounded text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-500" />
+                                <button type="button" onClick={() => handleAddSubcategory(cat.id)} disabled={!newSubcats[cat.id]?.trim()} className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs font-semibold hover:bg-gray-300 disabled:opacity-50">Añadir</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </main>
 
-        {/* Barra de navegación inferior (Fija y no hace scroll) */}
         <nav className="bg-white border-t border-gray-200 w-full shrink-0 z-50 pb-safe">
           <div className="flex justify-around items-center p-2">
             <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center p-2 w-16 ${activeTab === 'dashboard' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'}`}><LayoutDashboard size={24} strokeWidth={activeTab === 'dashboard' ? 2.5 : 2} /> <span className="text-[10px] mt-1 font-medium">Inicio</span></button>
@@ -674,6 +1029,45 @@ export default function App() {
             <button onClick={() => setActiveTab('categories')} className={`flex flex-col items-center p-2 w-16 ${activeTab === 'categories' ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'}`}><Settings size={24} strokeWidth={activeTab === 'categories' ? 2.5 : 2} /> <span className="text-[10px] mt-1 font-medium">Ajustes</span></button>
           </div>
         </nav>
+
+        {/* MODAL PARA NUEVO CICLO DE PAGO */}
+        {showPeriodModal && (
+          <div className="absolute inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl shadow-xl w-full overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                  <Bookmark size={18} className="text-emerald-600" />
+                  Guardar Ciclo de Pago
+                </h3>
+                <button onClick={() => setShowPeriodModal(false)} className="text-gray-400 hover:text-gray-600 bg-white rounded-full p-1 shadow-sm border border-gray-200">
+                  <X size={16} />
+                </button>
+              </div>
+              <form onSubmit={handleAddPeriod} className="p-4 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nombre del Ciclo</label>
+                  <input type="text" value={modalPeriodName} onChange={e => setModalPeriodName(e.target.value)} placeholder="Ej. Quincena Marzo..." className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-sm text-gray-800 focus:outline-none focus:border-emerald-500" autoFocus />
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1 flex items-center gap-1"><Calendar size={12}/> Desde</label>
+                    <input type="date" value={modalStartDate} onChange={e => setModalStartDate(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-800 focus:outline-none focus:border-emerald-500" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1 flex items-center gap-1"><Calendar size={12}/> Hasta</label>
+                    <input type="date" value={modalEndDate} onChange={e => setModalEndDate(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-2.5 text-xs text-gray-800 focus:outline-none focus:border-emerald-500" />
+                  </div>
+                </div>
+                <div className="pt-3 flex gap-2">
+                  <button type="button" onClick={() => setShowPeriodModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors">Cancelar</button>
+                  <button type="submit" disabled={!modalPeriodName.trim() || isSubmitting} className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 flex justify-center items-center">
+                    {isSubmitting ? <LoadingSpinner /> : 'Guardar Ciclo'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
