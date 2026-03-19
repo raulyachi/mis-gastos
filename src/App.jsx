@@ -113,11 +113,22 @@ export default function App() {
   const [modalPeriodName, setModalPeriodName] = useState('');
   const [modalStartDate, setModalStartDate] = useState('');
   const [modalEndDate, setModalEndDate] = useState('');
+  const [editingPeriodId, setEditingPeriodId] = useState(null); // NUEVO ESTADO: Para saber si estamos editando
 
   const openPeriodModal = () => {
+    setEditingPeriodId(null); // Nos aseguramos de que sea modo "Nuevo"
     setModalPeriodName('');
     setModalStartDate(filterStartDate);
     setModalEndDate(filterEndDate);
+    setShowPeriodModal(true);
+  };
+
+  // NUEVA FUNCIÓN: Para abrir el modal en modo edición
+  const openEditPeriodModal = (period) => {
+    setEditingPeriodId(period.id);
+    setModalPeriodName(period.name);
+    setModalStartDate(period.start);
+    setModalEndDate(period.end);
     setShowPeriodModal(true);
   };
 
@@ -320,14 +331,25 @@ export default function App() {
     if (!modalPeriodName.trim() || !user || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'periods'), { 
-        name: modalPeriodName.trim(), 
-        start: modalStartDate, 
-        end: modalEndDate,
-        timestamp: Date.now()
-      });
+      if (editingPeriodId) {
+        // Actualizar ciclo existente
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'periods', editingPeriodId), { 
+          name: modalPeriodName.trim(), 
+          start: modalStartDate, 
+          end: modalEndDate
+        });
+      } else {
+        // Crear nuevo ciclo
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'periods'), { 
+          name: modalPeriodName.trim(), 
+          start: modalStartDate, 
+          end: modalEndDate,
+          timestamp: Date.now()
+        });
+      }
       setShowPeriodModal(false);
       setModalPeriodName('');
+      setEditingPeriodId(null);
     } catch (error) { console.error("Error guardando periodo:", error); } 
     finally { setIsSubmitting(false); }
   };
@@ -935,7 +957,14 @@ export default function App() {
                               <p className="font-bold text-xs text-gray-700">{p.name}</p>
                               <p className="text-[10px] text-gray-500">{formatDateLabel(p.start)} al {formatDateLabel(p.end)}</p>
                             </div>
-                            <button onClick={() => deletePeriod(p.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={14}/></button>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => openEditPeriodModal(p)} className="text-gray-400 hover:text-blue-500 p-1.5 rounded-md hover:bg-blue-50 transition-colors">
+                                <Pencil size={14}/>
+                              </button>
+                              <button onClick={() => deletePeriod(p.id)} className="text-gray-400 hover:text-red-500 p-1.5 rounded-md hover:bg-red-50 transition-colors">
+                                <Trash2 size={14}/>
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1037,9 +1066,9 @@ export default function App() {
               <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                 <h3 className="font-bold text-gray-800 flex items-center gap-2">
                   <Bookmark size={18} className="text-emerald-600" />
-                  Guardar Ciclo de Pago
+                  {editingPeriodId ? 'Editar Ciclo de Pago' : 'Guardar Ciclo de Pago'}
                 </h3>
-                <button onClick={() => setShowPeriodModal(false)} className="text-gray-400 hover:text-gray-600 bg-white rounded-full p-1 shadow-sm border border-gray-200">
+                <button onClick={() => {setShowPeriodModal(false); setEditingPeriodId(null);}} className="text-gray-400 hover:text-gray-600 bg-white rounded-full p-1 shadow-sm border border-gray-200">
                   <X size={16} />
                 </button>
               </div>
@@ -1059,9 +1088,9 @@ export default function App() {
                   </div>
                 </div>
                 <div className="pt-3 flex gap-2">
-                  <button type="button" onClick={() => setShowPeriodModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors">Cancelar</button>
+                  <button type="button" onClick={() => {setShowPeriodModal(false); setEditingPeriodId(null);}} className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors">Cancelar</button>
                   <button type="submit" disabled={!modalPeriodName.trim() || isSubmitting} className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 flex justify-center items-center">
-                    {isSubmitting ? <LoadingSpinner /> : 'Guardar Ciclo'}
+                    {isSubmitting ? <LoadingSpinner /> : (editingPeriodId ? 'Actualizar Ciclo' : 'Guardar Ciclo')}
                   </button>
                 </div>
               </form>
