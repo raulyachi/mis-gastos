@@ -898,7 +898,6 @@ export default function App() {
                     </button>
                   </div>
                   
-                  {/* NUEVA SECCIÓN DE EXPORTACIÓN CON FECHAS INDEPENDIENTES */}
                   <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
                     <h3 className="text-sm font-semibold text-gray-600 mb-3 flex items-center gap-2">
                       <Download size={16} className="text-blue-600"/>
@@ -990,58 +989,63 @@ export default function App() {
                       </div>
                     </form>
 
+                    {/* Lista filtrada según el tipo seleccionado */}
                     <div className="space-y-4 border-t border-gray-100 pt-4">
-                      <div>
-                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Tus Gastos</h4>
-                        <div className="space-y-3">
-                          {categories.filter(c => c.type === 'gasto').map(cat => (
-                            <div key={cat.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
-                              <div className="flex justify-between items-center mb-2">
-                                <span className="font-bold text-gray-700">{cat.name}</span>
-                                <button onClick={() => deleteCategory(cat.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                      {newCatType === 'gasto' && (
+                        <div>
+                          <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Tus Gastos</h4>
+                          <div className="space-y-3">
+                            {categories.filter(c => c.type === 'gasto').map(cat => (
+                              <div key={cat.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+                                <div className="flex justify-between items-center mb-2">
+                                  <span className="font-bold text-gray-700">{cat.name}</span>
+                                  <button onClick={() => deleteCategory(cat.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5 mb-3">
+                                  {(cat.subcategories || []).map((sub, idx) => (
+                                    <span key={idx} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
+                                      {sub}
+                                      <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
+                                    </span>
+                                  ))}
+                                </div>
+                                <div className="flex gap-2">
+                                  <input type="text" value={newSubcats[cat.id] || ''} onChange={(e) => setNewSubcats({...newSubcats, [cat.id]: e.target.value})} placeholder="Nueva subcategoría..." className="flex-1 bg-white border border-gray-200 rounded text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-500" />
+                                  <button type="button" onClick={() => handleAddSubcategory(cat.id)} disabled={!newSubcats[cat.id]?.trim()} className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs font-semibold hover:bg-gray-300 disabled:opacity-50">Añadir</button>
+                                </div>
                               </div>
-                              <div className="flex flex-wrap gap-1.5 mb-3">
-                                {(cat.subcategories || []).map((sub, idx) => (
-                                  <span key={idx} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
-                                    {sub}
-                                    <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
-                                  </span>
-                                ))}
-                              </div>
-                              <div className="flex gap-2">
-                                <input type="text" value={newSubcats[cat.id] || ''} onChange={(e) => setNewSubcats({...newSubcats, [cat.id]: e.target.value})} placeholder="Nueva subcategoría..." className="flex-1 bg-white border border-gray-200 rounded text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-500" />
-                                <button type="button" onClick={() => handleAddSubcategory(cat.id)} disabled={!newSubcats[cat.id]?.trim()} className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs font-semibold hover:bg-gray-300 disabled:opacity-50">Añadir</button>
-                              </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
-                      <div>
-                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mt-6">Tus Ingresos</h4>
-                        <div className="space-y-3">
-                          {categories.filter(c => c.type === 'ingreso').map(cat => (
-                            <div key={cat.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
-                              <div className="flex justify-between items-center mb-2">
-                                <span className="font-bold text-gray-700">{cat.name}</span>
-                                <button onClick={() => deleteCategory(cat.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                      {newCatType === 'ingreso' && (
+                        <div>
+                          <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mt-2">Tus Ingresos</h4>
+                          <div className="space-y-3">
+                            {categories.filter(c => c.type === 'ingreso').map(cat => (
+                              <div key={cat.id} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+                                <div className="flex justify-between items-center mb-2">
+                                  <span className="font-bold text-gray-700">{cat.name}</span>
+                                  <button onClick={() => deleteCategory(cat.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5 mb-3">
+                                  {(cat.subcategories || []).map((sub, idx) => (
+                                    <span key={idx} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
+                                      {sub}
+                                      <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
+                                    </span>
+                                  ))}
+                                </div>
+                                <div className="flex gap-2">
+                                  <input type="text" value={newSubcats[cat.id] || ''} onChange={(e) => setNewSubcats({...newSubcats, [cat.id]: e.target.value})} placeholder="Nueva subcategoría..." className="flex-1 bg-white border border-gray-200 rounded text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-500" />
+                                  <button type="button" onClick={() => handleAddSubcategory(cat.id)} disabled={!newSubcats[cat.id]?.trim()} className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs font-semibold hover:bg-gray-300 disabled:opacity-50">Añadir</button>
+                                </div>
                               </div>
-                              <div className="flex flex-wrap gap-1.5 mb-3">
-                                {(cat.subcategories || []).map((sub, idx) => (
-                                  <span key={idx} className="bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded text-[11px] flex items-center gap-1 shadow-sm">
-                                    {sub}
-                                    <button onClick={() => handleDeleteSubcategory(cat.id, sub)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={10}/></button>
-                                  </span>
-                                ))}
-                              </div>
-                              <div className="flex gap-2">
-                                <input type="text" value={newSubcats[cat.id] || ''} onChange={(e) => setNewSubcats({...newSubcats, [cat.id]: e.target.value})} placeholder="Nueva subcategoría..." className="flex-1 bg-white border border-gray-200 rounded text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-500" />
-                                <button type="button" onClick={() => handleAddSubcategory(cat.id)} disabled={!newSubcats[cat.id]?.trim()} className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs font-semibold hover:bg-gray-300 disabled:opacity-50">Añadir</button>
-                              </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
                 </div>
